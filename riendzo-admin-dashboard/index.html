@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Riendzo Admin Dashboard</title>
+    
+    <!-- External CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <!-- Internal CSS -->
+    <link rel="stylesheet" href="src/css/main.css?v=2">
+    <link rel="stylesheet" href="src/css/components.css?v=2">
+    <link rel="stylesheet" href="src/css/dashboard.css?v=2">
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+</head>
+<body>
+    <!-- App Container -->
+    <div id="app" class="flex h-screen">
+        <!-- Sidebar Component -->
+        <div id="sidebar-container"></div>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-y-auto">
+            <!-- Header Component -->
+            <div id="header-container"></div>
+
+            <!-- Dynamic Content Sections -->
+            <div id="content-container">
+                <!-- Dashboard Section -->
+                <section id="dashboard" class="p-6 fade-in">
+                    <div id="dashboard-content"></div>
+                </section>
+
+                <!-- Trips Section -->
+                <section id="trips" class="p-6 hidden">
+                    <div id="trips-content"></div>
+                </section>
+
+                <!-- Users Section -->
+                <section id="users" class="p-6 hidden">
+                    <div id="users-content"></div>
+                </section>
+
+                <!-- Chats Section -->
+                <section id="chats" class="p-6 hidden">
+                    <div id="chats-content"></div>
+                </section>
+
+                <!-- Analytics Section -->
+                <section id="analytics" class="p-6 hidden">
+                    <div id="analytics-content"></div>
+                </section>
+
+                <!-- Categories Section -->
+                <section id="categories" class="p-6 hidden">
+                    <div id="categories-content"></div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal Container -->
+    <div id="modal-container"></div>
+
+    <!-- Notification Container -->
+    <div id="notification-container" class="fixed top-4 right-4 z-50"></div>
+
+    <!-- Bundled App -->
+    <script src="dist/bundle.js?v=3"></script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!-- Trip Modal -->
+<div id="trip-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <h3 class="text-xl font-semibold mb-6">Add/Edit Trip</h3>
+        <form id="trip-form" class="space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+                <input type="text" id="trip-name" placeholder="Trip Name" 
+                       class="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <input type="text" id="destination" placeholder="Destination" 
+                       class="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <input type="date" id="start-date" 
+                       class="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <input type="date" id="end-date" 
+                       class="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+            <input type="number" id="budget" placeholder="Budget" 
+                   class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <select id="travel-type" 
+                    class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="">Select Travel Type</option>
+                <option value="Adventure">Adventure</option>
+                <option value="Beaches">Beaches</option>
+                <option value="Culture">Culture</option>
+                <option value="Cuisine">Cuisine</option>
+                <option value="Exploration">Exploration</option>
+                <option value="Festivals">Festivals</option>
+                <option value="Hiking">Hiking</option>
+                <option value="History">History</option>
+                <option value="Relaxation">Relaxation</option>
+                <option value="Safari">Safari</option>
+                <option value="Scenery">Scenery</option>
+                <option value="Sports">Sports</option>
+                <option value="Wildlife">Wildlife</option>
+                <option value="Cruises">Cruises</option>
+                <option value="Mountains">Mountains</option>
+                <option value="Photography">Photography</option>
+                <option value="Roadtrips">Roadtrips</option>
+                <option value="Shopping">Shopping</option>
+                <option value="Spa">Spa</option>
+                <option value="Waterfalls">Waterfalls</option>
+            </select>
+            <textarea id="description" placeholder="Description" rows="4" 
+                      class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+            <div class="flex justify-end space-x-3">
+                <button type="button" onclick="app.closeTripModal()" 
+                        class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition">Cancel</button>
+                <button type="submit" 
+                        class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">Save Trip</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Category Modal -->
+<div id="category-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-8 max-w-md w-full">
+        <h3 class="text-xl font-semibold mb-6">Add Category</h3>
+        <form id="category-form" class="space-y-4">
+            <input type="text" id="category-name" placeholder="Category Name" 
+                   class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <input type="text" id="category-image" placeholder="Image URL" 
+                   class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <div class="flex justify-end space-x-3">
+                <button type="button" onclick="app.closeCategoryModal()" 
+                        class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition">Cancel</button>
+                <button type="submit" 
+                        class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">Save Category</button>
+            </div>
+        </form>
+    </div>
+</div>

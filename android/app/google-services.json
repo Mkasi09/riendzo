@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "354234220170",
+    "project_id": "riendzo",
+    "storage_bucket": "riendzo.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:354234220170:android:4258c22c9bcfa32728f773",
+        "android_client_info": {
+          "package_name": "riendzo.io.riendzo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDO2BuVb3giWbNKddRDRqLRcpdyrC20tlY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

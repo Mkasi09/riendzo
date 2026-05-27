@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Riendo Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .sidebar { transition: all 0.3s ease; }
+        .card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        .stat-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .message-item { transition: background-color 0.2s ease; }
+        .message-item:hover { background-color: #f3f4f6; }
+        .trip-card { transition: all 0.3s ease; }
+        .trip-card:hover { transform: scale(1.02); }
+        .fade-in { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <!-- Firebase Configuration -->
+    <script>
+        // Initialize Firebase (you'll need to replace with your actual config)
+        const firebaseConfig = {
+            apiKey: "your-api-key",
+            authDomain: "riendzo.firebaseapp.com",
+            projectId: "riendzo",
+            storageBucket: "riendzo.appspot.com",
+            messagingSenderId: "your-sender-id",
+            appId: "your-app-id"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+        const rtdb = firebase.database();
+    </script>
+
+    <div class="flex h-screen">
+        <!-- Sidebar -->
+        <aside class="sidebar w-64 bg-white shadow-lg">
+            <div class="p-6 border-b">
+                <h1 class="text-2xl font-bold text-indigo-600">
+                    <i class="fas fa-plane-departure mr-2"></i>Riendo Admin
+                </h1>
+            </div>
+            <nav class="p-4">
+                <ul class="space-y-2">
+                    <li><a href="#" onclick="showSection('dashboard')" class="nav-item flex items-center p-3 rounded-lg hover:bg-indigo-50 text-gray-700 hover:text-indigo-600 transition">
+                        <i class="fas fa-tachometer-alt w-5 mr-3"></i>Dashboard
+                    </a></li>
+                    <li><a href="#" onclick="showSection('trips')" class="nav-item flex items-center p-3 rounded-lg hover:bg-indigo-50 text-gray-700 hover:text-indigo-600 transition">
+                        <i class="fas fa-map-marked-alt w-5 mr-3"></i>Trips
+                    </a></li>
+                    <li><a href="#" onclick="showSection('users')" class="nav-item flex items-center p-3 rounded-lg hover:bg-indigo-50 text-gray-700 hover:text-indigo-600 transition">
+                        <i class="fas fa-users w-5 mr-3"></i>Users
+                    </a></li>
+                    <li><a href="#" onclick="showSection('chats')" class="nav-item flex items-center p-3 rounded-lg hover:bg-indigo-50 text-gray-700 hover:text-indigo-600 transition">
+                        <i class="fas fa-comments w-5 mr-3"></i>Chats
+                    </a></li>
+                    <li><a href="#" onclick="showSection('analytics')" class="nav-item flex items-center p-3 rounded-lg hover:bg-indigo-50 text-gray-700 hover:text-indigo-600 transition">
+                        <i class="fas fa-chart-line w-5 mr-3"></i>Analytics
+                    </a></li>
+                    <li><a href="#" onclick="showSection('categories')" class="nav-item flex items-center p-3 rounded-lg hover:bg-indigo-50 text-gray-700 hover:text-indigo-600 transition">
+                        <i class="fas fa-tags w-5 mr-3"></i>Categories
+                    </a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-y-auto">
+            <!-- Header -->
+            <header class="bg-white shadow-sm border-b">
+                <div class="px-6 py-4 flex justify-between items-center">
+                    <h2 id="section-title" class="text-2xl font-semibold text-gray-800">Dashboard</h2>
+                    <div class="flex items-center space-x-4">
+                        <button onclick="refreshData()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
+                            <i class="fas fa-sync-alt mr-2"></i>Refresh
+                        </button>
+                        <div class="relative">
+                            <span class="absolute top-0 right-0 h-3 w-3 bg-red-500 rounded-full pulse"></span>
+                            <i class="fas fa-bell text-gray-600 text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Dashboard Section -->
+            <section id="dashboard" class="p-6 fade-in">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div class="stat-card text-white p-6 rounded-xl shadow-lg">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <p class="text-white/80 text-sm">Total Trips</p>
+                                <p id="total-trips" class="text-3xl font-bold mt-2">0</p>
+                            </div>
+                            <i class="fas fa-map-marked-alt text-3xl text-white/50"></i>
+                        </div>
+                    </div>
+                    <div class="stat-card text-white p-6 rounded-xl shadow-lg">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <p class="text-white/80 text-sm">Active Users</p>
+                                <p id="total-users" class="text-3xl font-bold mt-2">0</p>
+                            </div>
+                            <i class="fas fa-users text-3xl text-white/50"></i>
+                        </div>
+                    </div>
+                    <div class="stat-card text-white p-6 rounded-xl shadow-lg">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <p class="text-white/80 text-sm">Total Messages</p>
+                                <p id="total-messages" class="text-3xl font-bold mt-2">0</p>
+                            </div>
+                            <i class="fas fa-comments text-3xl text-white/50"></i>
+                        </div>
+                    </div>
+                    <div class="stat-card text-white p-6 rounded-xl shadow-lg">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <p class="text-white/80 text-sm">Total Likes</p>
+                                <p id="total-likes" class="text-3xl font-bold mt-2">0</p>
+                            </div>
+                            <i class="fas fa-heart text-3xl text-white/50"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-white p-6 rounded-xl shadow-lg">
+                        <h3 class="text-lg font-semibold mb-4">Recent Trips</h3>
+                        <div id="recent-trips" class="space-y-3">
+                            <!-- Recent trips will be loaded here -->
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-lg">
+                        <h3 class="text-lg font-semibold mb-4">Recent Activity</h3>
+                        <div id="recent-activity" class="space-y-3">
+                            <!-- Recent activity will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Trips Section -->
+            <section id="trips" class="p-6 hidden">
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-xl font-semibold">Trip Management</h3>
+                        <button onclick="openTripModal()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
+                            <i class="fas fa-plus mr-2"></i>Add Trip
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full table-auto">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Destination</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dates</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Budget</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Likes</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="trips-table" class="bg-white divide-y divide-gray-200">
+                                <!-- Trips will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Users Section -->
+            <section id="users" class="p-6 hidden">
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                    <h3 class="text-xl font-semibold mb-6">User Management</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="users-grid">
+                        <!-- Users will be loaded here -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Chats Section -->
+            <section id="chats" class="p-6 hidden">
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                    <h3 class="text-xl font-semibold mb-6">Chat Management</h3>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div>
+                            <h4 class="font-medium mb-4">Active Conversations</h4>
+                            <div id="conversations-list" class="space-y-2">
+                                <!-- Conversations will be loaded here -->
+                            </div>
+                        </div>
+                        <div>
+                            <h4 class="font-medium mb-4">Recent Messages</h4>
+                            <div id="messages-list" class="space-y-2">
+                                <!-- Messages will be loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Analytics Section -->
+            <section id="analytics" class="p-6 hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-white p-6 rounded-xl shadow-lg">
+                        <h3 class="text-lg font-semibold mb-4">Trip Categories Distribution</h3>
+                        <canvas id="categories-chart"></canvas>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-lg">
+                        <h3 class="text-lg font-semibold mb-4">User Activity Timeline</h3>
+                        <canvas id="activity-chart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Categories Section -->
+            <section id="categories" class="p-6 hidden">
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-xl font-semibold">Travel Categories</h3>
+                        <button onclick="openCategoryModal()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
+                            <i class="fas fa-plus mr-2"></i>Add Category
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4" id="categories-grid">
+                        <!-- Categories will be loaded here -->
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Trip Modal -->
+    <div id="trip-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <h3 class="text-xl font-semibold mb-6">Add/Edit Trip</h3>
+            <form id="trip-form" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <input type="text" id="trip-name" placeholder="Trip Name" class="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <input type="text" id="destination" placeholder="Destination" class="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <input type="date" id="start-date" class="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <input type="date" id="end-date" class="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+                <input type="number" id="budget" placeholder="Budget" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <select id="travel-type" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="">Select Travel Type</option>
+                    <option value="Adventure">Adventure</option>
+                    <option value="Beaches">Beaches</option>
+                    <option value="Culture">Culture</option>
+                    <option value="Cuisine">Cuisine</option>
+                    <option value="Exploration">Exploration</option>
+                    <option value="Festivals">Festivals</option>
+                    <option value="Hiking">Hiking</option>
+                    <option value="History">History</option>
+                    <option value="Relaxation">Relaxation</option>
+                    <option value="Safari">Safari</option>
+                    <option value="Scenery">Scenery</option>
+                    <option value="Sports">Sports</option>
+                    <option value="Wildlife">Wildlife</option>
+                    <option value="Cruises">Cruises</option>
+                    <option value="Mountains">Mountains</option>
+                    <option value="Photography">Photography</option>
+                    <option value="Roadtrips">Roadtrips</option>
+                    <option value="Shopping">Shopping</option>
+                    <option value="Spa">Spa</option>
+                    <option value="Waterfalls">Waterfalls</option>
+                </select>
+                <textarea id="description" placeholder="Description" rows="4" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="closeTripModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">Save Trip</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Category Modal -->
+    <div id="category-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl p-8 max-w-md w-full">
+            <h3 class="text-xl font-semibold mb-6">Add Category</h3>
+            <form id="category-form" class="space-y-4">
+                <input type="text" id="category-name" placeholder="Category Name" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <input type="text" id="category-image" placeholder="Image URL" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="closeCategoryModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">Save Category</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>

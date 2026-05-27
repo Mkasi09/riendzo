@@ -1,0 +1,216 @@
+<aside class="sidebar w-72 bg-gradient-to-b from-slate-900 to-slate-800 shadow-2xl border-r border-slate-700">
+    <!-- Logo Section -->
+    <div class="p-6 border-b border-slate-700">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+                <i class="fas fa-plane-departure text-white text-lg"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-bold text-white">Riendo</h1>
+                <p class="text-xs text-slate-400">Admin Panel</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="p-4">
+        <ul class="space-y-1">
+            <!-- Dashboard -->
+            <li>
+                <a href="#" 
+                   onclick="app.showSection('dashboard')" 
+                   class="nav-item group flex items-center px-4 py-3 mx-2 rounded-xl text-slate-300 hover:bg-gradient-to-r hover:from-indigo-500 hover:to-purple-600 hover:text-white transition-all duration-300 transform hover:scale-105 hover:shadow-lg">
+                    <i class="fas fa-tachometer-alt w-5 mr-3 text-center group-hover:animate-pulse"></i>
+                    <span class="font-medium">Dashboard</span>
+                    <div class="ml-auto">
+                        <span class="inline-block w-2 h-2 bg-indigo-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    </div>
+                </a>
+            </li>
+
+            <!-- Trips -->
+            <li>
+                <a href="#" 
+                   onclick="app.showSection('trips')" 
+                   class="nav-item group flex items-center px-4 py-3 mx-2 rounded-xl text-slate-300 hover:bg-gradient-to-r hover:from-emerald-500 hover:to-teal-600 hover:text-white transition-all duration-300 transform hover:scale-105 hover:shadow-lg">
+                    <i class="fas fa-map-marked-alt w-5 mr-3 text-center group-hover:animate-bounce"></i>
+                    <span class="font-medium">Trips</span>
+                    <div class="ml-auto">
+                        <span class="inline-block w-2 h-2 bg-emerald-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    </div>
+                </a>
+            </li>
+
+            <!-- Users -->
+            <li>
+                <a href="#" 
+                   onclick="app.showSection('users')" 
+                   class="nav-item group flex items-center px-4 py-3 mx-2 rounded-xl text-slate-300 hover:bg-gradient-to-r hover:from-blue-500 hover:to-cyan-600 hover:text-white transition-all duration-300 transform hover:scale-105 hover:shadow-lg">
+                    <i class="fas fa-users w-5 mr-3 text-center group-hover:animate-pulse"></i>
+                    <span class="font-medium">Users</span>
+                    <div class="ml-auto">
+                        <span class="inline-block w-2 h-2 bg-blue-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    </div>
+                </a>
+            </li>
+
+            <!-- Chats -->
+            <li>
+                <a href="#" 
+                   onclick="app.showSection('chats')" 
+                   class="nav-item group flex items-center px-4 py-3 mx-2 rounded-xl text-slate-300 hover:bg-gradient-to-r hover:from-purple-500 hover:to-pink-600 hover:text-white transition-all duration-300 transform hover:scale-105 hover:shadow-lg">
+                    <i class="fas fa-comments w-5 mr-3 text-center group-hover:animate-bounce"></i>
+                    <span class="font-medium">Chats</span>
+                    <div class="ml-auto">
+                        <span class="inline-block w-2 h-2 bg-purple-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    </div>
+                </a>
+            </li>
+
+            <!-- Analytics -->
+            <li>
+                <a href="#" 
+                   onclick="app.showSection('analytics')" 
+                   class="nav-item group flex items-center px-4 py-3 mx-2 rounded-xl text-slate-300 hover:bg-gradient-to-r hover:from-orange-500 hover:to-red-600 hover:text-white transition-all duration-300 transform hover:scale-105 hover:shadow-lg">
+                    <i class="fas fa-chart-line w-5 mr-3 text-center group-hover:animate-pulse"></i>
+                    <span class="font-medium">Analytics</span>
+                    <div class="ml-auto">
+                        <span class="inline-block w-2 h-2 bg-orange-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    </div>
+                </a>
+            </li>
+
+            <!-- Categories -->
+            <li>
+                <a href="#" 
+                   onclick="app.showSection('categories')" 
+                   class="nav-item group flex items-center px-4 py-3 mx-2 rounded-xl text-slate-300 hover:bg-gradient-to-r hover:from-green-500 hover:to-emerald-600 hover:text-white transition-all duration-300 transform hover:scale-105 hover:shadow-lg">
+                    <i class="fas fa-tags w-5 mr-3 text-center group-hover:animate-bounce"></i>
+                    <span class="font-medium">Categories</span>
+                    <div class="ml-auto">
+                        <span class="inline-block w-2 h-2 bg-green-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    </div>
+                </a>
+            </li>
+
+            <!-- Reports -->
+            <li>
+                <a href="#" 
+                   onclick="app.showSection('reports')" 
+                   class="nav-item group flex items-center px-4 py-3 mx-2 rounded-xl text-slate-300 hover:bg-gradient-to-r hover:from-red-500 hover:to-rose-600 hover:text-white transition-all duration-300 transform hover:scale-105 hover:shadow-lg">
+                    <i class="fas fa-file-alt w-5 mr-3 text-center group-hover:animate-pulse"></i>
+                    <span class="font-medium">Reports</span>
+                    <div class="ml-auto">
+                        <span class="inline-block w-2 h-2 bg-red-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    </div>
+                </a>
+            </li>
+
+            <!-- Bookings -->
+            <li>
+                <a href="#" 
+                   onclick="app.showSection('bookings')" 
+                   class="nav-item group flex items-center px-4 py-3 mx-2 rounded-xl text-slate-300 hover:bg-gradient-to-r hover:from-teal-500 hover:to-cyan-600 hover:text-white transition-all duration-300 transform hover:scale-105 hover:shadow-lg">
+                    <i class="fas fa-calendar-check w-5 mr-3 text-center group-hover:animate-bounce"></i>
+                    <span class="font-medium">Bookings</span>
+                    <div class="ml-auto">
+                        <span class="inline-block w-2 h-2 bg-teal-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    </div>
+                </a>
+            </li>
+
+            <!-- Reviews -->
+            <li>
+                <a href="#" 
+                   onclick="app.showSection('reviews')" 
+                   class="nav-item group flex items-center px-4 py-3 mx-2 rounded-xl text-slate-300 hover:bg-gradient-to-r hover:from-yellow-500 hover:to-amber-600 hover:text-white transition-all duration-300 transform hover:scale-105 hover:shadow-lg">
+                    <i class="fas fa-star w-5 mr-3 text-center group-hover:animate-pulse"></i>
+                    <span class="font-medium">Reviews</span>
+                    <div class="ml-auto">
+                        <span class="inline-block w-2 h-2 bg-yellow-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    </div>
+                </a>
+            </li>
+
+            <!-- Support -->
+            <li>
+                <a href="#" 
+                   onclick="app.showSection('support')" 
+                   class="nav-item group flex items-center px-4 py-3 mx-2 rounded-xl text-slate-300 hover:bg-gradient-to-r hover:from-lime-500 hover:to-green-600 hover:text-white transition-all duration-300 transform hover:scale-105 hover:shadow-lg">
+                    <i class="fas fa-headset w-5 mr-3 text-center group-hover:animate-bounce"></i>
+                    <span class="font-medium">Support</span>
+                    <div class="ml-auto">
+                        <span class="inline-block w-2 h-2 bg-lime-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    </div>
+                </a>
+            </li>
+
+            <!-- API -->
+            <li>
+                <a href="#" 
+                   onclick="app.showSection('api')" 
+                   class="nav-item group flex items-center px-4 py-3 mx-2 rounded-xl text-slate-300 hover:bg-gradient-to-r hover:from-indigo-500 hover:to-blue-600 hover:text-white transition-all duration-300 transform hover:scale-105 hover:shadow-lg">
+                    <i class="fas fa-code w-5 mr-3 text-center group-hover:animate-pulse"></i>
+                    <span class="font-medium">API</span>
+                    <div class="ml-auto">
+                        <span class="inline-block w-2 h-2 bg-indigo-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                    </div>
+                </a>
+            </li>
+        </ul>
+    </nav>
+
+    <!-- Quick Actions Section -->
+    <div class="px-4 py-3 border-t border-slate-700">
+        <p class="text-xs text-slate-400 font-medium mb-3">Quick Actions</p>
+        <div class="grid grid-cols-3 gap-2">
+            <button onclick="app.showSection('dashboard')" 
+                    class="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors group">
+                <i class="fas fa-home text-slate-400 group-hover:text-white text-xs"></i>
+            </button>
+            <button onclick="app.refreshData()" 
+                    class="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors group">
+                <i class="fas fa-sync-alt text-slate-400 group-hover:text-white text-xs"></i>
+            </button>
+            <button onclick="app.exportData()" 
+                    class="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors group">
+                <i class="fas fa-download text-slate-400 group-hover:text-white text-xs"></i>
+            </button>
+            <button onclick="app.toggleTheme()" 
+                    class="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors group">
+                <i class="fas fa-moon text-slate-400 group-hover:text-white text-xs"></i>
+            </button>
+            <button onclick="app.openHelp()" 
+                    class="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors group">
+                <i class="fas fa-question text-slate-400 group-hover:text-white text-xs"></i>
+            </button>
+            <button onclick="app.openSettings()" 
+                    class="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors group">
+                <i class="fas fa-cog text-slate-400 group-hover:text-white text-xs"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Bottom Section -->
+    <div class="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-700">
+        <!-- System Status -->
+        <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center space-x-2">
+                <i class="fas fa-circle text-green-400 animate-pulse text-xs"></i>
+                <span class="text-slate-400 text-xs">System Online</span>
+            </div>
+            <span class="text-slate-500 text-xs" id="current-time">12:00 PM</span>
+        </div>
+        
+        <!-- User Info -->
+        <div class="flex items-center space-x-2 p-2 bg-slate-700 rounded-lg">
+            <div class="w-6 h-6 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center">
+                <i class="fas fa-user text-white text-xs"></i>
+            </div>
+            <div class="flex-1">
+                <p class="text-xs text-slate-300 font-medium">Admin</p>
+                <p class="text-xs text-slate-500">v2.0.1</p>
+            </div>
+        </div>
+    </div>
+</aside>
