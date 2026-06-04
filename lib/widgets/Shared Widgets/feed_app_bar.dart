@@ -4,6 +4,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:riendzo/views/inbox/inbox.dart';
+import 'package:riendzo/views/notifications/notifications_screen.dart';
 import 'package:riendzo/views/profile/profile.dart';
 
 class FeedAppBar extends StatefulWidget implements PreferredSizeWidget {
@@ -113,8 +114,11 @@ class _FeedAppBarState extends State<FeedAppBar> {
           tooltip: 'Notifications',
           icon: const Icon(Icons.notifications_none_rounded),
           onPressed: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('No new notifications')),
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const NotificationsScreen(),
+              ),
             );
           },
         ),

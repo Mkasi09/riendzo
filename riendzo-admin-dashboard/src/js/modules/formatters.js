@@ -6,14 +6,37 @@ export function formatDate(dateString) {
 }
 
 export function formatCurrency(amount) {
-    const numericAmount = Number(amount);
+    const numericAmount = parseCurrencyAmount(amount);
     if (!Number.isFinite(numericAmount)) return 'Not set';
 
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-ZA', {
         style: 'currency',
-        currency: 'USD',
+        currency: 'ZAR',
         maximumFractionDigits: 0
     }).format(numericAmount);
+}
+
+export function formatRand(amount) {
+    const numericAmount = parseCurrencyAmount(amount);
+    if (!Number.isFinite(numericAmount)) return 'Not set';
+
+    return new Intl.NumberFormat('en-ZA', {
+        style: 'currency',
+        currency: 'ZAR',
+        maximumFractionDigits: 0
+    }).format(numericAmount);
+}
+
+function parseCurrencyAmount(amount) {
+    if (typeof amount === 'number') return amount;
+    if (!amount) return Number.NaN;
+
+    const cleaned = String(amount)
+        .replace(/\b(ZAR|USD)\b/gi, '')
+        .replace(/[R$,]/g, '')
+        .trim();
+
+    return Number(cleaned);
 }
 
 export function getUserStatus(user) {

@@ -42,7 +42,8 @@ export const collections = {
     trips: 'trips',
     users: 'users',
     chats: 'chats',
-    categories: 'categories'
+    categories: 'categories',
+    transportRequests: 'transport_requests'
 };
 
 // Firebase paths for real-time database

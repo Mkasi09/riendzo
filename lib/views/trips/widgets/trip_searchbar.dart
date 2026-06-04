@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:riendzo/services/google_api_config.dart';
 
 class SearchCard extends StatefulWidget {
   final DateTimeRange? selectedDateRange;
@@ -26,10 +27,7 @@ class _SearchCardState extends State<SearchCard> {
   String _selectedTripType = 'Solo';
 
   Future<List<String>> getSuggestions(String query) async {
-    const apiKey = String.fromEnvironment(
-      'GOOGLE_PLACES_API_KEY',
-      defaultValue: '',
-    );
+    final apiKey = GoogleApiConfig.placesApiKey;
     if (apiKey.isEmpty) return [];
 
     final url =

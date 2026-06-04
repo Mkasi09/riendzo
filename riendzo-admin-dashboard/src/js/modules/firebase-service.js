@@ -101,6 +101,17 @@ export class FirebaseService {
         }
     }
 
+    async updateUser(userId, userData) {
+        try {
+            this.assertReady();
+            await this.db.collection(this.collections.users).doc(userId).update(userData);
+            return true;
+        } catch (error) {
+            console.error('Error updating user:', error);
+            throw error;
+        }
+    }
+
     // Chats operations
     async getChats() {
         try {
@@ -109,6 +120,17 @@ export class FirebaseService {
             return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         } catch (error) {
             console.error('Error fetching chats:', error);
+            throw error;
+        }
+    }
+
+    async getTransportRequests() {
+        try {
+            this.assertReady();
+            const snapshot = await this.db.collection(this.collections.transportRequests).get();
+            return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        } catch (error) {
+            console.error('Error fetching transport requests:', error);
             throw error;
         }
     }

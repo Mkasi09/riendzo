@@ -14,6 +14,7 @@ The active dashboard is bundled through webpack from `src/js/app.js`.
 - It reads from Firebase in deployed environments.
 - It does not use demo or mock data in the active dashboard.
 - If Firebase is unavailable, the UI shows a backend error state and exposes retry.
+- Riendzo Partner transport operations read from the `transport_requests` Firestore collection used by `C:\dev\riendzo_partner`.
 
 ## Shared Display Helpers
 

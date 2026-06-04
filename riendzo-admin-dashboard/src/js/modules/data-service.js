@@ -11,11 +11,12 @@ export class DataService {
             this.firebaseService.getUsers(),
             this.firebaseService.getChats()
         ]);
+        const transportRequests = await this.firebaseService.getTransportRequests();
 
         const totalLikes = trips.reduce((sum, trip) => sum + Number(trip.likes || 0), 0);
         const totalMessages = chats.reduce((sum, chat) => sum + (chat.messages ? chat.messages.length : 1), 0);
 
-        return { trips, users, chats, totalLikes, totalMessages };
+        return { trips, users, chats, transportRequests, totalLikes, totalMessages };
     }
 
     async getTrip(tripId) {
@@ -24,6 +25,18 @@ export class DataService {
 
     async getUser(userId) {
         return this.firebaseService.getUser(userId);
+    }
+
+    async createTrip(tripData) {
+        return this.firebaseService.createTrip(tripData);
+    }
+
+    async updateTrip(tripId, tripData) {
+        return this.firebaseService.updateTrip(tripId, tripData);
+    }
+
+    async updateUser(userId, userData) {
+        return this.firebaseService.updateUser(userId, userData);
     }
 }
 

@@ -12,8 +12,11 @@ import 'package:riendzo/views/my_trips/booking/widgets/booking_header.dart';
 import 'package:riendzo/views/my_trips/booking/widgets/custom_button.dart';
 import 'package:riendzo/views/my_trips/booking/widgets/custom_text_field.dart';
 import 'package:riendzo/views/my_trips/booking/widgets/transport_request_section.dart';
+import 'package:riendzo/services/currency_formatter.dart';
 import 'package:riendzo/services/transport_fare_calculator.dart';
+import 'package:riendzo/services/google_api_config.dart';
 import 'package:riendzo/services/transport_route_estimator.dart';
+import 'package:riendzo/services/user_notification_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_typeahead/flutter_typeahead.dart';
 import '../../../widgets/Shared Widgets/friendsSelection.dart';
@@ -31,8 +34,13 @@ class _BookingPageState extends State<BookingPage> {
   final TextEditingController _tripNameController = TextEditingController();
   final TextEditingController _destinationController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
+  final TextEditingController _maxGroupSizeController = TextEditingController(
+    text: '6',
+  );
   final TextEditingController _datesController = TextEditingController();
   final TextEditingController _transportPickupController =
+      TextEditingController();
+  final TextEditingController _transportPickupTimeController =
       TextEditingController();
   final TextEditingController _transportDropoffController =
       TextEditingController();
@@ -41,10 +49,10 @@ class _BookingPageState extends State<BookingPage> {
   final TextEditingController _transportNoteController =
       TextEditingController();
   DateTimeRange? _selectedDateRange;
+  TimeOfDay? _transportPickupTime;
   final DateFormat dateFormat = DateFormat('dd MMM');
 
-  File? _selectedImage;
-  String? _imageUrl;
+  final List<File> _selectedImages = [];
   bool _isLoading = false;
   List<Map<String, String>> _invitedFriends = [];
   bool _requestTransport = false;
@@ -117,15 +125,9 @@ class _BookingPageState extends State<BookingPage> {
   }
 
   Future<List<String>> getSuggestions(String query) async {
-    // TODO: Replace with your actual Google Places API key
-    // Store this securely in environment variables or a secure configuration file
-    const apiKey = String.fromEnvironment(
-      'GOOGLE_PLACES_API_KEY',
-      defaultValue: '',
-    );
-    if (apiKey.isEmpty) {
-      throw Exception('Google Places API key not configured');
-    }
+    final apiKey = GoogleApiConfig.placesApiKey;
+    if (apiKey.isEmpty) return [];
+
     final url =
         'https://maps.googleapis.com/maps/api/place/autocomplete/json?input=$query&key=$apiKey';
 
@@ -176,6 +178,18 @@ class _BookingPageState extends State<BookingPage> {
       return;
     }
 
+    final maxGroupSize = isSoloSelected
+        ? 1
+        : int.tryParse(_maxGroupSizeController.text);
+    if (maxGroupSize == null || maxGroupSize < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Group trips must allow at least 2 people.'),
+        ),
+      );
+      return;
+    }
+
     // Extract and format start and end dates
     final DateTime startDate = _selectedDateRange!.start;
     final DateTime endDate = _selectedDateRange!.end;
@@ -194,11 +208,10 @@ class _BookingPageState extends State<BookingPage> {
       return;
     }
 
-    // Check if an image is selected
-    if (_selectedImage == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Please select an image')));
+    if (_selectedImages.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select at least one photo')),
+      );
       return;
     }
 
@@ -209,6 +222,13 @@ class _BookingPageState extends State<BookingPage> {
           const SnackBar(
             content: Text('Please enter pickup and dropoff locations'),
           ),
+        );
+        return;
+      }
+
+      if (_transportPickupTime == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please select a pickup time')),
         );
         return;
       }
@@ -240,20 +260,18 @@ class _BookingPageState extends State<BookingPage> {
       _isLoading = true;
     });
 
-    String imageUrl = '';
-    if (_selectedImage != null) {
-      try {
-        imageUrl = await _uploadImageToFirebaseStorage(_selectedImage!);
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error uploading image: $e')));
-        setState(() {
-          _isLoading = false;
-        });
-        return;
-      }
+    List<String> imageUrls = [];
+    try {
+      imageUrls = await _uploadImagesToFirebaseStorage(_selectedImages);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error uploading photos: $e')));
+      setState(() {
+        _isLoading = false;
+      });
+      return;
     }
 
     CollectionReference trips = FirebaseFirestore.instance.collection('trips');
@@ -267,26 +285,47 @@ class _BookingPageState extends State<BookingPage> {
       final estimatedFare = _requestTransport
           ? _transportRouteEstimate!.estimatedFare
           : null;
+      final pickupAt = _requestTransport
+          ? DateTime(
+              startDate.year,
+              startDate.month,
+              startDate.day,
+              _transportPickupTime!.hour,
+              _transportPickupTime!.minute,
+            )
+          : null;
+      final invitedUsers = _pendingInviteUsers();
+      final inviteStatuses = {
+        for (final friend in invitedUsers)
+          if ((friend['id'] ?? '').isNotEmpty) friend['id']!: 'pending',
+      };
 
       final tripDoc = await trips.add({
         'userId': user?.uid,
         'destination': _destinationController.text,
         'startDate': dateFormat.format(startDate),
         'endDate': dateFormat.format(endDate),
-        'budget': "\$${_budgetController.text}", // Save budget with $
+        'budget': CurrencyFormatter.formatRand(_budgetController.text),
         'interest': _selectedInterest,
         'tripName': _tripNameController.text,
         'description': _descriptionController.text,
-        'imagePath': imageUrl,
+        'imagePath': imageUrls.first,
+        'imageUrls': imageUrls,
         'status': 'ongoing',
         'travelType': isSoloSelected ? 'Solo' : 'Friends', // Save travel type
-        'invitedFriends': _invitedFriends,
+        'maxGroupSize': maxGroupSize,
+        'joinedUsers': [],
+        'invitedFriends': invitedUsers,
+        'invitedUsers': invitedUsers,
+        'inviteStatuses': inviteStatuses,
         'transportRequested': _requestTransport,
         if (_requestTransport)
           'transport': {
             'status': 'requested',
             'type': _transportType,
             'pickup': _transportPickupController.text.trim(),
+            'pickupTime': _transportPickupTimeController.text.trim(),
+            'pickupAt': pickupAt == null ? null : Timestamp.fromDate(pickupAt),
             'dropoff': _transportDropoffController.text.trim(),
             'passengers': int.parse(_transportPassengersController.text),
             'distanceKm': distanceKm,
@@ -296,6 +335,12 @@ class _BookingPageState extends State<BookingPage> {
           },
       });
 
+      await _sendTripInvites(
+        tripId: tripDoc.id,
+        tripName: _tripNameController.text.trim(),
+        invitedUsers: invitedUsers,
+      );
+
       if (_requestTransport) {
         await FirebaseFirestore.instance.collection('transport_requests').add({
           'tripId': tripDoc.id,
@@ -303,6 +348,12 @@ class _BookingPageState extends State<BookingPage> {
           'riderName': user?.displayName ?? user?.email ?? 'Riendzo traveler',
           'tripName': _tripNameController.text.trim(),
           'destination': _destinationController.text.trim(),
+          'tripStartDate': dateFormat.format(startDate),
+          'tripEndDate': dateFormat.format(endDate),
+          'tripStartAt': Timestamp.fromDate(startDate),
+          'tripEndAt': Timestamp.fromDate(endDate),
+          'pickupTime': _transportPickupTimeController.text.trim(),
+          'pickupAt': pickupAt == null ? null : Timestamp.fromDate(pickupAt),
           'pickup': _transportPickupController.text.trim(),
           'dropoff': _transportDropoffController.text.trim(),
           'passengers': int.parse(_transportPassengersController.text),
@@ -333,10 +384,18 @@ class _BookingPageState extends State<BookingPage> {
     }
   }
 
+  Future<List<String>> _uploadImagesToFirebaseStorage(List<File> images) async {
+    final urls = <String>[];
+    for (final image in images) {
+      urls.add(await _uploadImageToFirebaseStorage(image));
+    }
+    return urls;
+  }
+
   Future<String> _uploadImageToFirebaseStorage(File image) async {
     FirebaseStorage storage = FirebaseStorage.instance;
     Reference ref = storage.ref().child(
-      "trip_images/${DateTime.now().millisecondsSinceEpoch}",
+      "trip_images/${DateTime.now().millisecondsSinceEpoch}_${image.path.hashCode}.jpg",
     );
     SettableMetadata metadata = SettableMetadata(
       cacheControl: 'max-age=60',
@@ -354,13 +413,87 @@ class _BookingPageState extends State<BookingPage> {
   }
 
   Future<void> _pickImage() async {
+    if (_selectedImages.length >= 4) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You can upload up to 4 photos.')),
+      );
+      return;
+    }
+
     final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    final pickedFiles = await picker.pickMultiImage();
+    if (pickedFiles.isEmpty) return;
+
+    final remainingSlots = 4 - _selectedImages.length;
+    final selectedFiles = pickedFiles.take(remainingSlots).toList();
     setState(() {
-      if (pickedFile != null) {
-        _selectedImage = File(pickedFile.path);
-      }
+      _selectedImages.addAll(selectedFiles.map((file) => File(file.path)));
     });
+
+    if (pickedFiles.length > selectedFiles.length) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You can upload up to 4 photos.')),
+      );
+    }
+  }
+
+  void _removeSelectedImage(int index) {
+    setState(() => _selectedImages.removeAt(index));
+  }
+
+  List<Map<String, String>> _pendingInviteUsers() {
+    return _invitedFriends.map((friend) {
+      return {
+        'id': friend['id'] ?? '',
+        'name': friend['name'] ?? 'Invited traveler',
+        'email': friend['email'] ?? '',
+        'profilePicture': friend['profilePicture'] ?? '',
+        'status': 'pending',
+      };
+    }).toList();
+  }
+
+  Future<void> _sendTripInvites({
+    required String tripId,
+    required String tripName,
+    required List<Map<String, String>> invitedUsers,
+  }) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+    for (final invitedUser in invitedUsers) {
+      final invitedUserId = invitedUser['id'] ?? '';
+      if (invitedUserId.isEmpty) continue;
+
+      await FirebaseFirestore.instance
+          .collection('trips')
+          .doc(tripId)
+          .collection('invites')
+          .doc(invitedUserId)
+          .set({
+            'userId': invitedUserId,
+            'displayName': invitedUser['name'] ?? 'Invited traveler',
+            'email': invitedUser['email'] ?? '',
+            'photoURL': invitedUser['profilePicture'] ?? '',
+            'ownerId': currentUser.uid,
+            'tripId': tripId,
+            'tripName': tripName,
+            'status': 'pending',
+            'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+
+      await UserNotificationService.create(
+        userId: invitedUserId,
+        type: 'trip_invite',
+        title: 'Trip invitation',
+        message:
+            '${currentUser.displayName ?? currentUser.email ?? 'Someone'} invited you to join $tripName.',
+        tripId: tripId,
+        actorUserId: currentUser.uid,
+      );
+    }
   }
 
   @override
@@ -370,8 +503,10 @@ class _BookingPageState extends State<BookingPage> {
     _destinationController.dispose();
     _datesController.dispose();
     _descriptionController.dispose();
+    _maxGroupSizeController.dispose();
     _routeDebounce?.cancel();
     _transportPickupController.dispose();
+    _transportPickupTimeController.dispose();
     _transportDropoffController.dispose();
     _transportPassengersController.dispose();
     _transportNoteController.dispose();
@@ -533,30 +668,10 @@ class _BookingPageState extends State<BookingPage> {
                 ),
                 const SizedBox(height: 5),
 
-                // Image upload section
-                GestureDetector(
-                  onTap: _pickImage,
-                  child: Container(
-                    height: 200,
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey),
-                      image: _selectedImage != null
-                          ? DecorationImage(
-                              image: FileImage(_selectedImage!),
-                              fit: BoxFit.cover,
-                            )
-                          : _imageUrl != null && _imageUrl!.isNotEmpty
-                          ? DecorationImage(
-                              image: NetworkImage(_imageUrl!),
-                              fit: BoxFit.cover,
-                            )
-                          : null,
-                    ),
-                    child: _selectedImage == null && _imageUrl == null
-                        ? const Center(child: Text('Upload a photo'))
-                        : const SizedBox.shrink(),
-                  ),
+                _TripPhotoPicker(
+                  images: _selectedImages,
+                  onAdd: _pickImage,
+                  onRemove: _removeSelectedImage,
                 ),
                 const SizedBox(height: 10),
 
@@ -579,6 +694,7 @@ class _BookingPageState extends State<BookingPage> {
                         setState(() {
                           isSoloSelected = true;
                           _invitedFriends = [];
+                          _maxGroupSizeController.text = '1';
                         });
                       },
                       text: "Solo",
@@ -593,6 +709,9 @@ class _BookingPageState extends State<BookingPage> {
                       onPressed: () async {
                         setState(() {
                           isSoloSelected = false;
+                          if (_maxGroupSizeController.text == '1') {
+                            _maxGroupSizeController.text = '6';
+                          }
                         });
                         final selected =
                             await Navigator.push<List<Map<String, String>>>(
@@ -605,6 +724,11 @@ class _BookingPageState extends State<BookingPage> {
                         if (selected != null && mounted) {
                           setState(() {
                             _invitedFriends = selected;
+                            final currentLimit =
+                                int.tryParse(_maxGroupSizeController.text) ?? 0;
+                            if (currentLimit < 2) {
+                              _maxGroupSizeController.text = '6';
+                            }
                           });
                         }
                       },
@@ -618,15 +742,25 @@ class _BookingPageState extends State<BookingPage> {
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Text(
-                      '${_invitedFriends.length} friend${_invitedFriends.length == 1 ? '' : 's'} invited',
+                      '${_invitedFriends.length} pending invite${_invitedFriends.length == 1 ? '' : 's'}',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
+                  ),
+                if (!isSoloSelected)
+                  CustomBookingTextField(
+                    controller: _maxGroupSizeController,
+                    icon: Icons.groups_2_outlined,
+                    text: 'Maximum group size',
+                    hintText: 'Total people including you',
+                    keyboardType: TextInputType.number,
+                    readOnly: false,
                   ),
                 TransportRequestSection(
                   enabled: _requestTransport,
                   transportType: _transportType,
                   pickupController: _transportPickupController,
+                  pickupTimeController: _transportPickupTimeController,
                   dropoffController: _transportDropoffController,
                   passengersController: _transportPassengersController,
                   noteController: _transportNoteController,
@@ -656,6 +790,7 @@ class _BookingPageState extends State<BookingPage> {
                     });
                   },
                   onRefreshRoute: _estimateRoute,
+                  onSelectPickupTime: _selectPickupTime,
                 ),
                 const SizedBox(height: 10),
 
@@ -681,6 +816,136 @@ class _BookingPageState extends State<BookingPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _selectPickupTime() async {
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: _transportPickupTime ?? TimeOfDay.now(),
+    );
+    if (pickedTime == null || !mounted) return;
+    setState(() {
+      _transportPickupTime = pickedTime;
+      _transportPickupTimeController.text = pickedTime.format(context);
+    });
+  }
+}
+
+class _TripPhotoPicker extends StatelessWidget {
+  final List<File> images;
+  final VoidCallback onAdd;
+  final void Function(int index) onRemove;
+
+  const _TripPhotoPicker({
+    required this.images,
+    required this.onAdd,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      margin: const EdgeInsets.only(top: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Trip photos',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ),
+                Text('${images.length}/4', style: theme.textTheme.bodyMedium),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Add up to 4 photos that sell the experience.',
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 12),
+            if (images.isEmpty)
+              InkWell(
+                onTap: onAdd,
+                borderRadius: BorderRadius.circular(14),
+                child: Container(
+                  height: 180,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: theme.colorScheme.outlineVariant),
+                    color: theme.colorScheme.surfaceContainerHighest,
+                  ),
+                  child: const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.add_photo_alternate_outlined, size: 42),
+                      SizedBox(height: 8),
+                      Text('Upload trip photos'),
+                    ],
+                  ),
+                ),
+              )
+            else
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: images.length + (images.length < 4 ? 1 : 0),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  childAspectRatio: 1.15,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                ),
+                itemBuilder: (context, index) {
+                  if (index == images.length) {
+                    return InkWell(
+                      onTap: onAdd,
+                      borderRadius: BorderRadius.circular(14),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: theme.colorScheme.outlineVariant,
+                          ),
+                        ),
+                        child: const Center(
+                          child: Icon(Icons.add_photo_alternate_outlined),
+                        ),
+                      ),
+                    );
+                  }
+
+                  return ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.file(images[index], fit: BoxFit.cover),
+                        Positioned(
+                          top: 6,
+                          right: 6,
+                          child: IconButton.filled(
+                            tooltip: 'Remove photo',
+                            onPressed: () => onRemove(index),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+          ],
+        ),
       ),
     );
   }

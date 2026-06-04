@@ -2,9 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../widgets/Shared Widgets/home_avatars_row.dart';
-import '../../widgets/Shared Widgets/one_image_card.dart';
 import '../my_trips/booking/booking_page.dart';
-import '../my_trips/trip_details.dart';
 import '../trips/trips.dart';
 
 class Home extends StatelessWidget {
@@ -254,31 +252,20 @@ class _TripRail extends StatelessWidget {
       return _EmptyState(text: emptyText);
     }
 
-    final cardWidth = MediaQuery.sizeOf(context).width.clamp(280.0, 420.0);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final cardWidth = (screenWidth * 0.82).clamp(300.0, 380.0);
 
     return SizedBox(
-      height: 220,
+      height: 318,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
+        clipBehavior: Clip.none,
         itemCount: trips.length,
         separatorBuilder: (context, index) => const SizedBox(width: 14),
         itemBuilder: (context, index) {
-          final trip = trips[index];
-          final data = trip.data() as Map<String, dynamic>;
-
-          return GestureDetector(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => TripDetailScreen(tripId: trip.id),
-              ),
-            ),
-            child: OneImageCard(
-              location: data['destination'] as String? ?? 'Unknown destination',
-              imageLink: data['imagePath'] as String? ?? '',
-              width: cardWidth * 0.72,
-              height: 210,
-            ),
+          return SizedBox(
+            width: cardWidth,
+            child: DiscoverTripCard(trip: trips[index]),
           );
         },
       ),

@@ -11,6 +11,7 @@ import 'package:riendzo/views/feed/Post.dart';
 import 'package:riendzo/views/feed/like_button_widget.dart';
 import 'package:riendzo/views/inbox/inbox.dart';
 import 'package:riendzo/views/my_trips/my_trips.dart';
+import 'package:riendzo/views/notifications/notifications_screen.dart';
 import 'package:riendzo/views/profile/ContactUsScreen.dart';
 import 'package:riendzo/views/profile/widgets/profile_card.dart';
 import 'package:riendzo/views/profile/widgets/profile_summary.dart';
@@ -314,12 +315,15 @@ class _ProfileState extends State<Profile> {
                               ),
                               textTitle: 'Notifications',
                               trailingIcon: Icons.chevron_right_rounded,
-                              onTap: () =>
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('No new notifications'),
-                                    ),
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const NotificationsScreen(),
                                   ),
+                                );
+                              },
                             ),
                             ProfileCard(
                               leadingIcon: const Icon(Icons.map_outlined),

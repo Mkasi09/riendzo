@@ -7,6 +7,7 @@ class TransportRequestSection extends StatelessWidget {
     required this.enabled,
     required this.transportType,
     required this.pickupController,
+    required this.pickupTimeController,
     required this.dropoffController,
     required this.passengersController,
     required this.noteController,
@@ -16,11 +17,13 @@ class TransportRequestSection extends StatelessWidget {
     required this.onEnabledChanged,
     required this.onTransportTypeChanged,
     required this.onRefreshRoute,
+    required this.onSelectPickupTime,
   });
 
   final bool enabled;
   final String transportType;
   final TextEditingController pickupController;
+  final TextEditingController pickupTimeController;
   final TextEditingController dropoffController;
   final TextEditingController passengersController;
   final TextEditingController noteController;
@@ -30,6 +33,7 @@ class TransportRequestSection extends StatelessWidget {
   final ValueChanged<bool> onEnabledChanged;
   final ValueChanged<String> onTransportTypeChanged;
   final VoidCallback onRefreshRoute;
+  final VoidCallback onSelectPickupTime;
 
   static const transportTypes = ['Standard', 'Comfort', 'XL'];
 
@@ -76,6 +80,18 @@ class TransportRequestSection extends StatelessWidget {
                 controller: pickupController,
                 icon: Icons.my_location_outlined,
                 label: 'Pickup location',
+              ),
+              const SizedBox(height: 10),
+              GestureDetector(
+                onTap: onSelectPickupTime,
+                child: AbsorbPointer(
+                  child: _TransportField(
+                    controller: pickupTimeController,
+                    icon: Icons.access_time,
+                    label: 'Pickup time',
+                    readOnly: true,
+                  ),
+                ),
               ),
               const SizedBox(height: 10),
               _TransportField(
@@ -170,7 +186,7 @@ class _FareEstimate extends StatelessWidget {
                 if (routeEstimate != null) ...[
                   const SizedBox(height: 4),
                   Text(
-                    '${routeEstimate!.distanceKm.toStringAsFixed(1)} km • ${routeEstimate!.durationMinutes} min',
+                    '${routeEstimate!.distanceKm.toStringAsFixed(1)} km - ${routeEstimate!.durationMinutes} min',
                     style: const TextStyle(
                       color: Color(0xFF416FDF),
                       fontSize: 12,
@@ -248,6 +264,7 @@ class _TransportField extends StatelessWidget {
     required this.label,
     this.keyboardType,
     this.maxLines = 1,
+    this.readOnly = false,
   });
 
   final TextEditingController controller;
@@ -255,6 +272,7 @@ class _TransportField extends StatelessWidget {
   final String label;
   final TextInputType? keyboardType;
   final int maxLines;
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -262,6 +280,7 @@ class _TransportField extends StatelessWidget {
       controller: controller,
       keyboardType: keyboardType,
       maxLines: maxLines,
+      readOnly: readOnly,
       decoration: InputDecoration(
         prefixIcon: Icon(icon),
         labelText: label,

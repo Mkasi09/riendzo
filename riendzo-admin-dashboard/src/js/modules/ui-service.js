@@ -212,11 +212,17 @@ export class UIService {
         return new Intl.NumberFormat().format(num);
     }
 
-    formatCurrency(amount, currency = 'USD') {
-        return new Intl.NumberFormat('en-US', {
+    formatCurrency(amount, currency = 'ZAR') {
+        const numericAmount = typeof amount === 'number'
+            ? amount
+            : Number(String(amount || '').replace(/\b(ZAR|USD)\b/gi, '').replace(/[R$,]/g, '').trim());
+
+        if (!Number.isFinite(numericAmount)) return 'Not set';
+
+        return new Intl.NumberFormat('en-ZA', {
             style: 'currency',
             currency: currency
-        }).format(amount);
+        }).format(numericAmount);
     }
 
     // Table utilities
