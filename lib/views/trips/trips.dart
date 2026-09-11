@@ -1,15 +1,17 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:riendzo/widgets/riendzo_sliver_app_bar.dart';
 import 'package:intl/intl.dart';
 import 'package:riendzo/services/currency_formatter.dart';
 import 'package:riendzo/views/my_trips/booking/booking_page.dart';
 import 'package:riendzo/views/my_trips/my_trips.dart';
 import 'package:riendzo/views/trips/widgets/trip_searchbar.dart';
-import 'package:riendzo/widgets/Shared%20Widgets/button_with_icon.dart';
 
 import '../../widgets/screen_sections.dart';
 import '../my_trips/trip_details.dart';
+
+enum _DiscoverTab { recommended, nearby, upcoming, past }
 
 class TripsFeed extends StatefulWidget {
   const TripsFeed({super.key});
@@ -25,6 +27,8 @@ class _TripsFeedState extends State<TripsFeed> {
   List<DocumentSnapshot> filteredTrips = [];
   bool hasSearched = false;
   String searchInput = '';
+  bool onlyAvailable = false;
+  _DiscoverTab selectedTab = _DiscoverTab.recommended;
 
   void onSearch(String searchInput) {
     final query = searchInput.trim();
@@ -42,15 +46,15 @@ class _TripsFeedState extends State<TripsFeed> {
 
     FirebaseFirestore.instance
         .collection('trips')
-        .where('status', isEqualTo: 'ongoing')
         .get()
         .then((snapshot) {
-          final filtered = snapshot.docs.where((doc) {
+          final matching = snapshot.docs.where((doc) {
             final data = doc.data();
             final destination = (data['destination'] as String? ?? '')
                 .toLowerCase();
             return searchWords.any(destination.contains);
           }).toList();
+          final filtered = _applyTabFilters(matching);
 
           if (!mounted) return;
           setState(() {
@@ -68,57 +72,81 @@ class _TripsFeedState extends State<TripsFeed> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Scaffold(
+    final isPast = selectedTab == _DiscoverTab.past;
+    final tabTitle = switch (selectedTab) {
+      _DiscoverTab.recommended => 'Recommended for you',
+      _DiscoverTab.nearby => 'Trips near you',
+      _DiscoverTab.upcoming => 'Upcoming departures',
+      _DiscoverTab.past => 'Past adventures',
+    };
+
+    return Scaffold(
+      body: NestedScrollView(
+        headerSliverBuilder: (context, innerBoxIsScrolled) => [
+          RiendzoSliverAppBar(
+            title: 'Discover trips',
+            subtitle: 'Find people, places, and experiences',
+            actions: [
+              IconButton(
+                tooltip: 'My trips',
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const MyTrips()),
+                ),
+                icon: const Icon(Icons.card_travel_rounded),
+              ),
+              IconButton(
+                tooltip: 'Create trip',
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BookingPage()),
+                ),
+                icon: const Icon(Icons.add_circle_outline_rounded),
+              ),
+              const SizedBox(width: 8),
+            ],
+          ),
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _DiscoverControlsDelegate(
+              child: _DiscoverControls(
+                selectedTab: selectedTab,
+                searchInput: searchInput,
+                selectedDateRange: selectedDateRange,
+                onlyAvailable: onlyAvailable,
+                onSearchTap: _openSearchFilters,
+                onAvailabilityChanged: (value) {
+                  setState(() {
+                    onlyAvailable = value;
+                    hasSearched = false;
+                  });
+                },
+                onTabChanged: (tab) {
+                  setState(() {
+                    selectedTab = tab;
+                    hasSearched = false;
+                    filteredTrips = [];
+                  });
+                },
+              ),
+            ),
+          ),
+        ],
         body: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
           children: [
-            Text('Discover', style: Theme.of(context).textTheme.displayMedium),
-            const SizedBox(height: 6),
-            Text(
-              'Find a trip worth joining, with the details that matter before you commit.',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 18),
-            SearchCard(
-              selectedDateRange: selectedDateRange,
-              onDateRangeSelected: (range) {
-                setState(() => selectedDateRange = range);
-              },
-              onSearch: onSearch,
-            ),
-            const SizedBox(height: 16),
-            ButtonWithIcon(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const BookingPage()),
-                );
-              },
-              iconData: Icons.add_rounded,
-              iconColor: Colors.white,
-              cardColor: Theme.of(context).colorScheme.primary,
-              textColor: Colors.white,
-              text: "Create Your Own Trip",
-              horizontalPadding: 0,
-              verticalPadding: 4,
-              TextSize: 15,
-            ),
-            const SizedBox(height: 10),
-            TextButton.icon(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const MyTrips()),
-                );
-              },
-              icon: const Icon(Icons.card_travel_rounded),
-              label: const Text('View my trips'),
+            _DiscoverIntro(
+              title: tabTitle,
+              isPast: isPast,
+              onCreateTrip: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const BookingPage()),
+              ),
             ),
             Sections(
               sectionName: hasSearched && filteredTrips.isNotEmpty
                   ? "Results for '$searchInput'"
-                  : 'Ongoing Trips',
+                  : tabTitle,
               trailingText: '',
               veritcalMargin: 10,
             ),
@@ -130,27 +158,122 @@ class _TripsFeedState extends State<TripsFeed> {
               _TripStream(
                 query: FirebaseFirestore.instance
                     .collection('trips')
-                    .where('status', isEqualTo: 'ongoing'),
-                emptyText: 'No ongoing trips available.',
-                builder: (trips) => _TripList(trips: trips),
+                    .where(
+                      'status',
+                      isEqualTo: isPast ? 'completed' : 'ongoing',
+                    ),
+                emptyText: isPast
+                    ? 'No past trips yet.'
+                    : 'No trips match these filters yet.',
+                builder: (trips) => _TripList(
+                  trips: _applyTabFilters(trips),
+                  emptyText: 'No trips match these filters yet.',
+                ),
               ),
-            const SizedBox(height: 16),
-            const Sections(
-              sectionName: 'Past Trips',
-              trailingText: '',
-              veritcalMargin: 10,
-            ),
-            _TripStream(
-              query: FirebaseFirestore.instance
-                  .collection('trips')
-                  .where('status', isEqualTo: 'completed'),
-              emptyText: 'No past trips available.',
-              builder: (trips) => _TripList(trips: trips),
-            ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _openSearchFilters() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          4,
+          20,
+          20 + MediaQuery.viewInsetsOf(sheetContext).bottom,
+        ),
+        child: SearchCard(
+          selectedDateRange: selectedDateRange,
+          onDateRangeSelected: (range) {
+            setState(() {
+              selectedDateRange = range;
+              hasSearched = false;
+            });
+          },
+          onSearch: (value) {
+            Navigator.pop(sheetContext);
+            onSearch(value);
+          },
+        ),
+      ),
+    );
+  }
+
+  List<DocumentSnapshot> _applyTabFilters(List<DocumentSnapshot> source) {
+    final trips = source.where((trip) {
+      final data = trip.data() as Map<String, dynamic>;
+      final status = data['status']?.toString();
+      if (selectedTab == _DiscoverTab.past) {
+        if (status != 'completed') return false;
+      } else if (status != 'ongoing') {
+        return false;
+      }
+
+      final current = DiscoverTripCard.currentGroupSize(data);
+      final maximum = DiscoverTripCard.maxGroupSize(data, current);
+      if (onlyAvailable && current >= maximum) return false;
+
+      if (selectedDateRange != null) {
+        final start = _tryParseDate(data['startDate']?.toString());
+        final end = _tryParseDate(data['endDate']?.toString()) ?? start;
+        if (start != null && end != null) {
+          if (end.isBefore(selectedDateRange!.start) ||
+              start.isAfter(selectedDateRange!.end)) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }).toList();
+
+    int compareDate(DocumentSnapshot a, DocumentSnapshot b) {
+      final aData = a.data() as Map<String, dynamic>;
+      final bData = b.data() as Map<String, dynamic>;
+      final aDate = _tryParseDate(aData['startDate']?.toString());
+      final bDate = _tryParseDate(bData['startDate']?.toString());
+      return (aDate ?? DateTime(2100)).compareTo(bDate ?? DateTime(2100));
+    }
+
+    switch (selectedTab) {
+      case _DiscoverTab.recommended:
+        trips.sort((a, b) {
+          final aData = a.data() as Map<String, dynamic>;
+          final bData = b.data() as Map<String, dynamic>;
+          final aCurrent = DiscoverTripCard.currentGroupSize(aData);
+          final bCurrent = DiscoverTripCard.currentGroupSize(bData);
+          final aSpots =
+              DiscoverTripCard.maxGroupSize(aData, aCurrent) - aCurrent;
+          final bSpots =
+              DiscoverTripCard.maxGroupSize(bData, bCurrent) - bCurrent;
+          return bSpots.compareTo(aSpots);
+        });
+      case _DiscoverTab.nearby:
+        trips.sort((a, b) {
+          final aName =
+              (a.data() as Map<String, dynamic>)['destination']
+                  ?.toString()
+                  .toLowerCase() ??
+              '';
+          final bName =
+              (b.data() as Map<String, dynamic>)['destination']
+                  ?.toString()
+                  .toLowerCase() ??
+              '';
+          return aName.compareTo(bName);
+        });
+      case _DiscoverTab.upcoming:
+        trips.sort(compareDate);
+      case _DiscoverTab.past:
+        trips.sort((a, b) => compareDate(b, a));
+    }
+    return trips;
   }
 
   void updateCompletedTrip(DocumentSnapshot trip) {
@@ -170,6 +293,223 @@ class _TripsFeedState extends State<TripsFeed> {
     } catch (_) {
       return null;
     }
+  }
+}
+
+class _DiscoverControlsDelegate extends SliverPersistentHeaderDelegate {
+  final Widget child;
+
+  const _DiscoverControlsDelegate({required this.child});
+
+  @override
+  double get minExtent => 142;
+
+  @override
+  double get maxExtent => 142;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      elevation: overlapsContent ? 3 : 0,
+      shadowColor: Colors.black26,
+      child: child,
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _DiscoverControlsDelegate oldDelegate) => true;
+}
+
+class _DiscoverControls extends StatelessWidget {
+  final _DiscoverTab selectedTab;
+  final String searchInput;
+  final DateTimeRange? selectedDateRange;
+  final bool onlyAvailable;
+  final VoidCallback onSearchTap;
+  final ValueChanged<bool> onAvailabilityChanged;
+  final ValueChanged<_DiscoverTab> onTabChanged;
+
+  const _DiscoverControls({
+    required this.selectedTab,
+    required this.searchInput,
+    required this.selectedDateRange,
+    required this.onlyAvailable,
+    required this.onSearchTap,
+    required this.onAvailabilityChanged,
+    required this.onTabChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final dateFormat = DateFormat('dd MMM');
+    final hasFilters = searchInput.isNotEmpty || selectedDateRange != null;
+    final summary = searchInput.isNotEmpty
+        ? searchInput
+        : selectedDateRange != null
+        ? '${dateFormat.format(selectedDateRange!.start)} – ${dateFormat.format(selectedDateRange!.end)}'
+        : 'Where would you like to go?';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 8),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: onSearchTap,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Ink(
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Row(
+                      children: [
+                        const SizedBox(width: 14),
+                        Icon(
+                          hasFilters
+                              ? Icons.tune_rounded
+                              : Icons.search_rounded,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            summary,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        const Icon(Icons.keyboard_arrow_down_rounded),
+                        const SizedBox(width: 10),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilterChip(
+                selected: onlyAvailable,
+                showCheckmark: false,
+                avatar: const Icon(Icons.event_available_outlined, size: 18),
+                label: const Text('Open'),
+                onSelected: onAvailabilityChanged,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 44,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                _tabChip('Recommended', _DiscoverTab.recommended),
+                _tabChip('Nearby', _DiscoverTab.nearby),
+                _tabChip('Upcoming', _DiscoverTab.upcoming),
+                _tabChip('Past', _DiscoverTab.past),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tabChip(String label, _DiscoverTab tab) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: selectedTab == tab,
+        onSelected: (_) => onTabChanged(tab),
+      ),
+    );
+  }
+}
+
+class _DiscoverIntro extends StatelessWidget {
+  final String title;
+  final bool isPast;
+  final VoidCallback onCreateTrip;
+
+  const _DiscoverIntro({
+    required this.title,
+    required this.isPast,
+    required this.onCreateTrip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Theme.of(context).colorScheme.primary.withValues(alpha: 0.14),
+            Theme.of(context).colorScheme.secondary.withValues(alpha: 0.08),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 5),
+                Text(
+                  isPast
+                      ? 'Look back at trips completed by the community.'
+                      : 'Compare dates, group size and open spots before joining.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+            ),
+          ),
+          if (!isPast) ...[
+            const SizedBox(width: 12),
+            FilledButton.tonalIcon(
+              onPressed: onCreateTrip,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Create'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _TripSkeletonList extends StatelessWidget {
+  const _TripSkeletonList();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: List.generate(
+        2,
+        (index) => Container(
+          height: 300,
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        ),
+      ),
+    );
   }
 }
 
@@ -197,9 +537,7 @@ class _TripStream extends StatelessWidget {
         }
 
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const _EmptyTripState(
-            text: 'Saved trips will appear here when available.',
-          );
+          return const _TripSkeletonList();
         }
 
         final trips = snapshot.data?.docs ?? [];
@@ -213,11 +551,16 @@ class _TripStream extends StatelessWidget {
 
 class _TripList extends StatelessWidget {
   final List<DocumentSnapshot> trips;
+  final String emptyText;
 
-  const _TripList({required this.trips});
+  const _TripList({
+    required this.trips,
+    this.emptyText = 'No trips available.',
+  });
 
   @override
   Widget build(BuildContext context) {
+    if (trips.isEmpty) return _EmptyTripState(text: emptyText);
     return Column(
       children: [
         for (final trip in trips)
@@ -230,14 +573,49 @@ class _TripList extends StatelessWidget {
   }
 }
 
-class DiscoverTripCard extends StatelessWidget {
+class DiscoverTripCard extends StatefulWidget {
   final DocumentSnapshot trip;
 
   const DiscoverTripCard({super.key, required this.trip});
 
   @override
+  State<DiscoverTripCard> createState() => _DiscoverTripCardState();
+
+  static int currentGroupSize(Map<String, dynamic> data) {
+    final ownerId = data['userId']?.toString();
+    final participantIds = <String>{};
+    if (ownerId != null && ownerId.isNotEmpty) participantIds.add(ownerId);
+
+    final joinedUsers = data['joinedUsers'];
+    if (joinedUsers is List) {
+      for (final joinedUser in joinedUsers) {
+        final id = joinedUser is Map
+            ? (joinedUser['userId'] ?? joinedUser['id'])?.toString()
+            : null;
+        if (id != null && id.isNotEmpty) participantIds.add(id);
+      }
+    }
+
+    return participantIds.isEmpty ? 1 : participantIds.length;
+  }
+
+  static int maxGroupSize(Map<String, dynamic> data, int currentGroupSize) {
+    final rawMax = data['maxGroupSize'];
+    final maxGroupSize = rawMax is num
+        ? rawMax.toInt()
+        : int.tryParse(rawMax?.toString() ?? '');
+    return maxGroupSize == null || maxGroupSize < currentGroupSize
+        ? currentGroupSize.clamp(1, 6)
+        : maxGroupSize;
+  }
+}
+
+class _DiscoverTripCardState extends State<DiscoverTripCard> {
+  bool isSaved = false;
+
+  @override
   Widget build(BuildContext context) {
-    final data = trip.data() as Map<String, dynamic>;
+    final data = widget.trip.data() as Map<String, dynamic>;
     final images = _tripImages(data);
     final tripName = _nonEmpty(data['tripName'], fallback: 'Unnamed trip');
     final destination = _nonEmpty(
@@ -246,8 +624,10 @@ class DiscoverTripCard extends StatelessWidget {
     );
     final budget = CurrencyFormatter.formatRand(data['budget']);
     final travelType = _nonEmpty(data['travelType'], fallback: 'Trip');
-    final currentGroupSize = _currentGroupSize(data);
-    final maxGroupSize = _maxGroupSize(data, currentGroupSize);
+    final currentGroupSize = DiscoverTripCard.currentGroupSize(data);
+    final maxGroupSize = DiscoverTripCard.maxGroupSize(data, currentGroupSize);
+    final availableSpots = (maxGroupSize - currentGroupSize).clamp(0, 99);
+    final dateLabel = _dateLabel(data);
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -276,25 +656,46 @@ class DiscoverTripCard extends StatelessWidget {
                 destination: destination,
                 tripName: tripName,
                 price: budget,
+                availableSpots: availableSpots,
+                isSaved: isSaved,
+                onSave: () => setState(() => isSaved = !isSaved),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                child: Row(
+                child: Column(
                   children: [
-                    Expanded(
-                      child: _CompactInfoTile(
-                        icon: Icons.group_outlined,
-                        label: 'Group size',
-                        value: '$currentGroupSize/$maxGroupSize going',
-                      ),
+                    Row(
+                      children: [
+                        const Icon(Icons.calendar_month_outlined, size: 18),
+                        const SizedBox(width: 7),
+                        Expanded(
+                          child: Text(
+                            dateLabel,
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                        ),
+                        const Icon(Icons.arrow_forward_rounded, size: 18),
+                      ],
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _CompactInfoTile(
-                        icon: Icons.explore_outlined,
-                        label: 'Travel type',
-                        value: travelType,
-                      ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _CompactInfoTile(
+                            icon: Icons.group_outlined,
+                            label: 'Group size',
+                            value: '$currentGroupSize/$maxGroupSize going',
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _CompactInfoTile(
+                            icon: Icons.explore_outlined,
+                            label: 'Travel type',
+                            value: travelType,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -310,7 +711,7 @@ class DiscoverTripCard extends StatelessWidget {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => TripDetailScreen(tripId: trip.id),
+        builder: (context) => TripDetailScreen(tripId: widget.trip.id),
       ),
     );
   }
@@ -335,32 +736,12 @@ class DiscoverTripCard extends StatelessWidget {
     return imagePath.isEmpty ? const [] : [imagePath];
   }
 
-  static int _currentGroupSize(Map<String, dynamic> data) {
-    final ownerId = data['userId']?.toString();
-    final participantIds = <String>{};
-    if (ownerId != null && ownerId.isNotEmpty) participantIds.add(ownerId);
-
-    final joinedUsers = data['joinedUsers'];
-    if (joinedUsers is List) {
-      for (final joinedUser in joinedUsers) {
-        final id = joinedUser is Map
-            ? (joinedUser['userId'] ?? joinedUser['id'])?.toString()
-            : null;
-        if (id != null && id.isNotEmpty) participantIds.add(id);
-      }
-    }
-
-    return participantIds.isEmpty ? 1 : participantIds.length;
-  }
-
-  static int _maxGroupSize(Map<String, dynamic> data, int currentGroupSize) {
-    final rawMax = data['maxGroupSize'];
-    final maxGroupSize = rawMax is num
-        ? rawMax.toInt()
-        : int.tryParse(rawMax?.toString() ?? '');
-    return maxGroupSize == null || maxGroupSize < currentGroupSize
-        ? currentGroupSize.clamp(1, 6)
-        : maxGroupSize;
+  String _dateLabel(Map<String, dynamic> data) {
+    final start = data['startDate']?.toString().trim() ?? '';
+    final end = data['endDate']?.toString().trim() ?? '';
+    if (start.isEmpty && end.isEmpty) return 'Dates shared by the host';
+    if (end.isEmpty || end == start) return start;
+    return '$start – $end';
   }
 }
 
@@ -369,12 +750,18 @@ class _TripHeroPhoto extends StatelessWidget {
   final String destination;
   final String tripName;
   final String price;
+  final int availableSpots;
+  final bool isSaved;
+  final VoidCallback onSave;
 
   const _TripHeroPhoto({
     required this.images,
     required this.destination,
     required this.tripName,
     required this.price,
+    required this.availableSpots,
+    required this.isSaved,
+    required this.onSave,
   });
 
   @override
@@ -401,8 +788,12 @@ class _TripHeroPhoto extends StatelessWidget {
             child: Row(
               children: [
                 Flexible(child: _PricePill(text: price)),
+                const SizedBox(width: 8),
+                _AvailabilityPill(availableSpots: availableSpots),
                 const Spacer(),
                 if (images.length > 1) _PhotoCountBadge(count: images.length),
+                const SizedBox(width: 8),
+                _SaveTripButton(isSaved: isSaved, onPressed: onSave),
               ],
             ),
           ),
@@ -451,6 +842,60 @@ class _TripHeroPhoto extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _AvailabilityPill extends StatelessWidget {
+  final int availableSpots;
+
+  const _AvailabilityPill({required this.availableSpots});
+
+  @override
+  Widget build(BuildContext context) {
+    final available = availableSpots > 0;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: available ? const Color(0xFFE6F8EF) : const Color(0xFFFFE8E8),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+        child: Text(
+          available ? '$availableSpots open' : 'Full',
+          style: TextStyle(
+            color: available
+                ? const Color(0xFF087443)
+                : const Color(0xFFA32020),
+            fontSize: 11,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SaveTripButton extends StatelessWidget {
+  final bool isSaved;
+  final VoidCallback onPressed;
+
+  const _SaveTripButton({required this.isSaved, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.42),
+      shape: const CircleBorder(),
+      child: IconButton(
+        tooltip: isSaved ? 'Remove saved trip' : 'Save trip',
+        visualDensity: VisualDensity.compact,
+        onPressed: onPressed,
+        icon: Icon(
+          isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+          color: Colors.white,
+        ),
       ),
     );
   }

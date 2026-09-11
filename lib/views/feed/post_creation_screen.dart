@@ -11,8 +11,13 @@ import 'package:video_player/video_player.dart';
 
 class PostCreationScreen extends StatefulWidget {
   final List<XFile> media;
+  final String initialText;
 
-  const PostCreationScreen({super.key, required this.media});
+  const PostCreationScreen({
+    super.key,
+    required this.media,
+    this.initialText = '',
+  });
 
   @override
   State<PostCreationScreen> createState() => _PostCreationScreenState();
@@ -20,6 +25,7 @@ class PostCreationScreen extends StatefulWidget {
 
 class _PostCreationScreenState extends State<PostCreationScreen> {
   final TextEditingController _textController = TextEditingController();
+  final TextEditingController _locationController = TextEditingController();
   final List<XFile> _selectedMedia = [];
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _firebaseStorage = FirebaseStorage.instance;
@@ -33,12 +39,17 @@ class _PostCreationScreenState extends State<PostCreationScreen> {
   void initState() {
     super.initState();
     _selectedMedia.addAll(widget.media);
+    _textController.text = widget.initialText;
+    _textController.selection = TextSelection.collapsed(
+      offset: _textController.text.length,
+    );
     _initializeVideoControllers();
   }
 
   @override
   void dispose() {
     _textController.dispose();
+    _locationController.dispose();
     for (final controller in _videoControllers.values) {
       controller.dispose();
     }
@@ -152,8 +163,10 @@ class _PostCreationScreenState extends State<PostCreationScreen> {
       'mediaUrls': media.map((item) => item.url).toList(),
       'mediaTypes': media.map((item) => item.type).toList(),
       'userId': userId,
+      'location': _locationController.text.trim(),
       'timestamp': FieldValue.serverTimestamp(),
       'likeCount': 0,
+      'commentCount': 0,
     });
   }
 
@@ -249,10 +262,19 @@ class _PostCreationScreenState extends State<PostCreationScreen> {
             TextField(
               controller: _textController,
               decoration: const InputDecoration(
-                hintText: "What's on your mind?",
+                hintText: 'Share a moment, discovery, or travel tip',
                 prefixIcon: Icon(Icons.edit_outlined),
               ),
               maxLines: null,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _locationController,
+              decoration: const InputDecoration(
+                hintText: 'Add a city or destination (optional)',
+                prefixIcon: Icon(Icons.place_outlined),
+              ),
+              textCapitalization: TextCapitalization.words,
             ),
             const SizedBox(height: 16),
             if (_selectedMedia.isNotEmpty)

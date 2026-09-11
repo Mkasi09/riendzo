@@ -28,11 +28,19 @@ class TransportRouteEstimate {
     required this.distanceKm,
     required this.durationMinutes,
     required this.estimatedFare,
+    required this.pickupLatitude,
+    required this.pickupLongitude,
+    required this.dropoffLatitude,
+    required this.dropoffLongitude,
   });
 
   final double distanceKm;
   final int durationMinutes;
   final double estimatedFare;
+  final double pickupLatitude;
+  final double pickupLongitude;
+  final double dropoffLatitude;
+  final double dropoffLongitude;
 
   TransportRouteEstimate copyWithFare({required String transportType}) {
     return TransportRouteEstimate(
@@ -43,6 +51,10 @@ class TransportRouteEstimate {
         distanceKm: distanceKm,
         durationMinutes: durationMinutes,
       ),
+      pickupLatitude: pickupLatitude,
+      pickupLongitude: pickupLongitude,
+      dropoffLatitude: dropoffLatitude,
+      dropoffLongitude: dropoffLongitude,
     );
   }
 }

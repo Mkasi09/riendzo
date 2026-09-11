@@ -8,8 +8,6 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart'; // For formatting dates
 import 'package:riendzo/views/my_trips/booking/widgets/custom_booking_dropdown.dart';
-import 'package:riendzo/views/my_trips/booking/widgets/booking_header.dart';
-import 'package:riendzo/views/my_trips/booking/widgets/custom_button.dart';
 import 'package:riendzo/views/my_trips/booking/widgets/custom_text_field.dart';
 import 'package:riendzo/views/my_trips/booking/widgets/transport_request_section.dart';
 import 'package:riendzo/services/currency_formatter.dart';
@@ -17,6 +15,7 @@ import 'package:riendzo/services/transport_fare_calculator.dart';
 import 'package:riendzo/services/google_api_config.dart';
 import 'package:riendzo/services/transport_route_estimator.dart';
 import 'package:riendzo/services/user_notification_service.dart';
+import 'package:riendzo/widgets/riendzo_sliver_app_bar.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_typeahead/flutter_typeahead.dart';
 import '../../../widgets/Shared Widgets/friendsSelection.dart';
@@ -324,9 +323,17 @@ class _BookingPageState extends State<BookingPage> {
             'status': 'requested',
             'type': _transportType,
             'pickup': _transportPickupController.text.trim(),
+            'pickupCoordinates': {
+              'latitude': _transportRouteEstimate!.pickupLatitude,
+              'longitude': _transportRouteEstimate!.pickupLongitude,
+            },
             'pickupTime': _transportPickupTimeController.text.trim(),
             'pickupAt': pickupAt == null ? null : Timestamp.fromDate(pickupAt),
             'dropoff': _transportDropoffController.text.trim(),
+            'dropoffCoordinates': {
+              'latitude': _transportRouteEstimate!.dropoffLatitude,
+              'longitude': _transportRouteEstimate!.dropoffLongitude,
+            },
             'passengers': int.parse(_transportPassengersController.text),
             'distanceKm': distanceKm,
             'durationMinutes': durationMinutes,
@@ -355,7 +362,15 @@ class _BookingPageState extends State<BookingPage> {
           'pickupTime': _transportPickupTimeController.text.trim(),
           'pickupAt': pickupAt == null ? null : Timestamp.fromDate(pickupAt),
           'pickup': _transportPickupController.text.trim(),
+          'pickupCoordinates': {
+            'latitude': _transportRouteEstimate!.pickupLatitude,
+            'longitude': _transportRouteEstimate!.pickupLongitude,
+          },
           'dropoff': _transportDropoffController.text.trim(),
+          'dropoffCoordinates': {
+            'latitude': _transportRouteEstimate!.dropoffLatitude,
+            'longitude': _transportRouteEstimate!.dropoffLongitude,
+          },
           'passengers': int.parse(_transportPassengersController.text),
           'distanceKm': distanceKm,
           'durationMinutes': durationMinutes,
@@ -513,311 +528,399 @@ class _BookingPageState extends State<BookingPage> {
     super.dispose();
   }
 
+  int _currentStep = 0;
+  static const _stepNames = [
+    'Trip basics',
+    'Travellers',
+    'Transport',
+    'Review',
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true,
-      body: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.only(left: 15, top: 10),
-            width: double.infinity,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const BookingHeader(
-                  text: 'Trip Information',
-                  color: Colors.black,
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      "I want to go to...",
-                      style: TextStyle(color: Colors.black),
-                    ),
-                    TypeAheadField<String>(
-                      controller: _destinationController,
-                      builder: (context, controller, focusNode) {
-                        return TextField(
-                          controller: controller,
-                          focusNode: focusNode,
-                          style: const TextStyle(
-                            color: Colors.black,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 23,
-                          ),
-                          decoration: const InputDecoration(
-                            hintText: "Enter destination",
-                            hintStyle: TextStyle(color: Colors.black),
-                          ),
-                        );
-                      },
-                      suggestionsCallback: (pattern) async {
-                        if (pattern.isNotEmpty) {
-                          return await getSuggestions(pattern);
-                        }
-                        return [];
-                      },
-                      itemBuilder: (context, suggestion) {
-                        return ListTile(title: Text(suggestion));
-                      },
-                      onSelected: (suggestion) {
-                        // Update the search bar with the selected suggestion
-                        _destinationController.text = suggestion;
-                      },
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView(
-              scrollDirection: Axis.vertical,
-              padding: const EdgeInsets.symmetric(horizontal: 10.0),
-              children: [
-                GestureDetector(
-                  onTap: () async {
-                    DateTimeRange? pickedRange = await showDateRangePicker(
-                      context: context,
-                      firstDate: DateTime.now(), // Disable past dates
-                      lastDate: DateTime(2030),
-                      initialDateRange: DateTimeRange(
-                        start: DateTime.now(),
-                        end: DateTime.now().add(const Duration(days: 7)),
-                      ),
-                    );
-
-                    if (pickedRange != null) {
-                      _datesController.text =
-                          '${dateFormat.format(pickedRange.start)} - ${dateFormat.format(pickedRange.end)}';
-                      _selectedDateRange =
-                          pickedRange; // Save the selected date range
-                    }
-                  },
-                  child: AbsorbPointer(
-                    child: CustomBookingTextField(
-                      controller: _datesController,
-                      icon: Icons.calendar_today_outlined,
-                      text: 'Dates',
-                      hintText: 'Select date range',
-                      keyboardType: TextInputType.datetime,
-                      readOnly: true,
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 1),
-                CustomBookingTextField(
-                  controller: _budgetController,
-                  icon: Icons.attach_money,
-                  text: 'Budget per person per day',
-                  hintText: 'Enter your budget',
-                  keyboardType: TextInputType.number,
-                  readOnly: false,
-                ),
-                CustomBookingDropdown(
-                  interests: [
-                    "Adventure",
-                    "Beaches",
-                    "Culture",
-                    "Cuisine",
-                    "Exploration",
-                    "Festivals",
-                    "Hiking",
-                    "History",
-                    "Relaxation",
-                    "Safari",
-                    "Scenery",
-                    "Sports",
-                    "Wildlife",
-                    "Cruises",
-                    "Mountains",
-                    "Photography",
-                    "Roadtrips",
-                    "Shopping",
-                    "Spa",
-                    "Waterfalls",
-                  ],
-                  selectedInterest: _selectedInterest,
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedInterest = value;
-                    });
-                  },
-                  icon: Icons.favorite_outline,
-                  hintText: 'Choose your interest',
-                ),
-                CustomBookingTextField(
-                  controller: _tripNameController,
-                  icon: Icons.trip_origin_outlined,
-                  text: 'Trip Name',
-                  hintText: 'e.g. Summer Vacation',
-                  keyboardType: TextInputType.text,
-                  readOnly: false,
-                ),
-                CustomBookingTextField(
-                  controller: _descriptionController,
-                  icon: Icons.description_outlined,
-                  text: 'Trip Description',
-                  hintText: 'Trip Description',
-                  keyboardType: TextInputType.multiline,
-                  readOnly: false,
-                ),
-                const SizedBox(height: 5),
-
-                _TripPhotoPicker(
-                  images: _selectedImages,
-                  onAdd: _pickImage,
-                  onRemove: _removeSelectedImage,
-                ),
-                const SizedBox(height: 10),
-
-                // Travel type section
-                Container(
-                  margin: const EdgeInsets.only(top: 15),
-                  child: const Text('Travel with ?'),
-                ),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 12,
-                  runSpacing: 8,
-                  children: [
-                    CustomButton(
-                      horizontalPadding: 11.5,
-                      cardColor: isSoloSelected
-                          ? Colors.blueAccent
-                          : Colors.white,
-                      onPressed: () {
-                        setState(() {
-                          isSoloSelected = true;
-                          _invitedFriends = [];
-                          _maxGroupSizeController.text = '1';
-                        });
-                      },
-                      text: "Solo",
-                      textColor: isSoloSelected ? Colors.white : Colors.blue,
-                      TextSize: 16.5,
-                    ),
-                    CustomButton(
-                      horizontalPadding: 5,
-                      cardColor: !isSoloSelected
-                          ? Colors.blueAccent
-                          : Colors.white,
-                      onPressed: () async {
-                        setState(() {
-                          isSoloSelected = false;
-                          if (_maxGroupSizeController.text == '1') {
-                            _maxGroupSizeController.text = '6';
-                          }
-                        });
-                        final selected =
-                            await Navigator.push<List<Map<String, String>>>(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    const FriendsSelectionPage(),
-                              ),
-                            );
-                        if (selected != null && mounted) {
-                          setState(() {
-                            _invitedFriends = selected;
-                            final currentLimit =
-                                int.tryParse(_maxGroupSizeController.text) ?? 0;
-                            if (currentLimit < 2) {
-                              _maxGroupSizeController.text = '6';
-                            }
-                          });
-                        }
-                      },
-                      text: "With Friends",
-                      textColor: !isSoloSelected ? Colors.white : Colors.blue,
-                      TextSize: 16.5,
-                    ),
-                  ],
-                ),
-                if (_invitedFriends.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      '${_invitedFriends.length} pending invite${_invitedFriends.length == 1 ? '' : 's'}',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  ),
-                if (!isSoloSelected)
-                  CustomBookingTextField(
-                    controller: _maxGroupSizeController,
-                    icon: Icons.groups_2_outlined,
-                    text: 'Maximum group size',
-                    hintText: 'Total people including you',
-                    keyboardType: TextInputType.number,
-                    readOnly: false,
-                  ),
-                TransportRequestSection(
-                  enabled: _requestTransport,
-                  transportType: _transportType,
-                  pickupController: _transportPickupController,
-                  pickupTimeController: _transportPickupTimeController,
-                  dropoffController: _transportDropoffController,
-                  passengersController: _transportPassengersController,
-                  noteController: _transportNoteController,
-                  routeEstimate: _transportRouteEstimate,
-                  isCalculatingRoute: _isCalculatingRoute,
-                  routeError: _routeError,
-                  onEnabledChanged: (value) {
-                    setState(() {
-                      _requestTransport = value;
-                      if (value && _transportDropoffController.text.isEmpty) {
-                        _transportDropoffController.text =
-                            _destinationController.text;
-                      }
-                      if (value) {
-                        _scheduleRouteEstimate();
-                      } else {
-                        _transportRouteEstimate = null;
-                        _routeError = null;
-                      }
-                    });
-                  },
-                  onTransportTypeChanged: (value) {
-                    setState(() {
-                      _transportType = value;
-                      _transportRouteEstimate = _transportRouteEstimate
-                          ?.copyWithFare(transportType: value);
-                    });
-                  },
-                  onRefreshRoute: _estimateRoute,
-                  onSelectPickupTime: _selectPickupTime,
-                ),
-                const SizedBox(height: 10),
-
-                // Save button
-                Container(
-                  margin: const EdgeInsets.all(15),
-                  width: double.infinity,
-                  child: CustomButton(
-                    horizontalPadding: 28,
-                    cardColor: Colors.blueAccent,
-                    onPressed: _isLoading
-                        ? null
-                        : _saveTripToFirebase, // Disable button if loading
-                    text: _isLoading
-                        ? "Saving..."
-                        : "Save", // Change text while loading
-
-                    textColor: Colors.white,
-                    TextSize: 16.5,
-                  ),
-                ),
-              ],
-            ),
+      body: NestedScrollView(
+        headerSliverBuilder: (context, innerBoxIsScrolled) => [
+          RiendzoSliverAppBar(
+            title: 'Plan a trip',
+            subtitle:
+                'Step ${_currentStep + 1} of 4 · ${_stepNames[_currentStep]}',
+            automaticallyImplyLeading: true,
           ),
         ],
+        body: Column(
+          children: [
+            _StepProgress(currentStep: _currentStep, labels: _stepNames),
+            Expanded(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: ListView(
+                  key: ValueKey(_currentStep),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                  children: switch (_currentStep) {
+                    0 => _basicsStep(),
+                    1 => _travellersStep(),
+                    2 => _transportStep(),
+                    _ => _reviewStep(),
+                  },
+                ),
+              ),
+            ),
+            _PlannerFooter(
+              currentStep: _currentStep,
+              loading: _isLoading,
+              onBack: _currentStep == 0
+                  ? null
+                  : () => setState(() => _currentStep--),
+              onContinue: _isLoading
+                  ? null
+                  : _currentStep == 3
+                  ? _saveTripToFirebase
+                  : _continueToNextStep,
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  List<Widget> _basicsStep() => [
+    _StepIntro(
+      icon: Icons.explore_outlined,
+      title: 'Where are you going?',
+      subtitle: 'Add the essentials. You can refine the details later.',
+    ),
+    TypeAheadField<String>(
+      controller: _destinationController,
+      builder: (context, controller, focusNode) => TextField(
+        controller: controller,
+        focusNode: focusNode,
+        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.place_outlined),
+          labelText: 'Destination',
+          hintText: 'Search a city or place',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      suggestionsCallback: (pattern) =>
+          pattern.trim().isEmpty ? <String>[] : getSuggestions(pattern),
+      itemBuilder: (context, suggestion) => ListTile(
+        leading: const Icon(Icons.location_on_outlined),
+        title: Text(suggestion),
+      ),
+      onSelected: (suggestion) => _destinationController.text = suggestion,
+    ),
+    const SizedBox(height: 14),
+    GestureDetector(
+      onTap: _pickDates,
+      child: AbsorbPointer(
+        child: CustomBookingTextField(
+          controller: _datesController,
+          icon: Icons.calendar_today_outlined,
+          text: 'Dates',
+          hintText: 'Select date range',
+          keyboardType: TextInputType.datetime,
+          readOnly: true,
+        ),
+      ),
+    ),
+    CustomBookingTextField(
+      controller: _tripNameController,
+      icon: Icons.trip_origin_outlined,
+      text: 'Trip name',
+      hintText: 'e.g. Cape Town summer',
+      keyboardType: TextInputType.text,
+      readOnly: false,
+    ),
+    CustomBookingTextField(
+      controller: _budgetController,
+      icon: Icons.payments_outlined,
+      text: 'Daily budget per person',
+      hintText: 'Enter your budget',
+      keyboardType: TextInputType.number,
+      readOnly: false,
+    ),
+    CustomBookingDropdown(
+      interests: const [
+        'Adventure',
+        'Beaches',
+        'Culture',
+        'Cuisine',
+        'Exploration',
+        'Festivals',
+        'Hiking',
+        'History',
+        'Relaxation',
+        'Safari',
+        'Scenery',
+        'Sports',
+        'Wildlife',
+        'Cruises',
+        'Mountains',
+        'Photography',
+        'Roadtrips',
+        'Shopping',
+        'Spa',
+        'Waterfalls',
+      ],
+      selectedInterest: _selectedInterest,
+      onChanged: (value) => setState(() => _selectedInterest = value),
+      icon: Icons.favorite_outline,
+      hintText: 'Choose your interest',
+    ),
+  ];
+
+  List<Widget> _travellersStep() => [
+    const _StepIntro(
+      icon: Icons.groups_2_outlined,
+      title: 'Who is coming?',
+      subtitle: 'Travel solo or invite friends to join your plan.',
+    ),
+    SegmentedButton<bool>(
+      segments: const [
+        ButtonSegment(
+          value: true,
+          icon: Icon(Icons.person_outline),
+          label: Text('Solo'),
+        ),
+        ButtonSegment(
+          value: false,
+          icon: Icon(Icons.group_outlined),
+          label: Text('With friends'),
+        ),
+      ],
+      selected: {isSoloSelected},
+      onSelectionChanged: (selection) async {
+        final solo = selection.first;
+        setState(() {
+          isSoloSelected = solo;
+          if (solo) {
+            _invitedFriends = [];
+            _maxGroupSizeController.text = '1';
+          } else if (_maxGroupSizeController.text == '1') {
+            _maxGroupSizeController.text = '6';
+          }
+        });
+        if (!solo) await _selectFriends();
+      },
+    ),
+    if (!isSoloSelected) ...[
+      const SizedBox(height: 14),
+      OutlinedButton.icon(
+        onPressed: _selectFriends,
+        icon: const Icon(Icons.person_add_alt_1_outlined),
+        label: Text(
+          _invitedFriends.isEmpty
+              ? 'Choose friends'
+              : '${_invitedFriends.length} friends selected',
+        ),
+        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+      ),
+      CustomBookingTextField(
+        controller: _maxGroupSizeController,
+        icon: Icons.groups_2_outlined,
+        text: 'Maximum group size',
+        hintText: 'Total people including you',
+        keyboardType: TextInputType.number,
+        readOnly: false,
+      ),
+    ],
+    ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      leading: const Icon(Icons.notes_outlined),
+      title: const Text('Trip description'),
+      subtitle: const Text('Optional'),
+      children: [
+        CustomBookingTextField(
+          controller: _descriptionController,
+          icon: Icons.description_outlined,
+          text: 'Description',
+          hintText: 'What should travellers know?',
+          keyboardType: TextInputType.multiline,
+          readOnly: false,
+        ),
+      ],
+    ),
+    const SizedBox(height: 10),
+    _TripPhotoPicker(
+      images: _selectedImages,
+      onAdd: _pickImage,
+      onRemove: _removeSelectedImage,
+    ),
+  ];
+
+  List<Widget> _transportStep() => [
+    const _StepIntro(
+      icon: Icons.local_taxi_outlined,
+      title: 'Need a ride?',
+      subtitle: 'Request a verified Riendzo partner for this trip.',
+    ),
+    TransportRequestSection(
+      enabled: _requestTransport,
+      transportType: _transportType,
+      pickupController: _transportPickupController,
+      pickupTimeController: _transportPickupTimeController,
+      dropoffController: _transportDropoffController,
+      passengersController: _transportPassengersController,
+      noteController: _transportNoteController,
+      routeEstimate: _transportRouteEstimate,
+      isCalculatingRoute: _isCalculatingRoute,
+      routeError: _routeError,
+      onEnabledChanged: (value) {
+        setState(() {
+          _requestTransport = value;
+          if (value && _transportDropoffController.text.isEmpty) {
+            _transportDropoffController.text = _destinationController.text;
+          }
+          if (!value) {
+            _transportRouteEstimate = null;
+            _routeError = null;
+          }
+        });
+        if (value) _scheduleRouteEstimate();
+      },
+      onTransportTypeChanged: (value) {
+        setState(() {
+          _transportType = value;
+          _transportRouteEstimate = _transportRouteEstimate?.copyWithFare(
+            transportType: value,
+          );
+        });
+      },
+      onRefreshRoute: _estimateRoute,
+      onSelectPickupTime: _selectPickupTime,
+    ),
+    if (!_requestTransport)
+      const Padding(
+        padding: EdgeInsets.all(18),
+        child: Text(
+          'You can add transport later from your trip details.',
+          textAlign: TextAlign.center,
+        ),
+      ),
+  ];
+
+  List<Widget> _reviewStep() => [
+    const _StepIntro(
+      icon: Icons.fact_check_outlined,
+      title: 'Ready to go?',
+      subtitle: 'Review your plan before creating the trip.',
+    ),
+    _ReviewCard(
+      title: 'Trip basics',
+      icon: Icons.place_outlined,
+      onEdit: () => setState(() => _currentStep = 0),
+      rows: [
+        ('Destination', _destinationController.text),
+        ('Dates', _datesController.text),
+        ('Trip name', _tripNameController.text),
+        ('Interest', _selectedInterest ?? 'Not selected'),
+        ('Daily budget', 'R${_budgetController.text}'),
+      ],
+    ),
+    const SizedBox(height: 12),
+    _ReviewCard(
+      title: 'Travellers',
+      icon: Icons.groups_2_outlined,
+      onEdit: () => setState(() => _currentStep = 1),
+      rows: [
+        ('Travel type', isSoloSelected ? 'Solo' : 'With friends'),
+        if (!isSoloSelected) ('Group size', _maxGroupSizeController.text),
+        if (_invitedFriends.isNotEmpty)
+          ('Invitations', '${_invitedFriends.length} pending'),
+        ('Photos', '${_selectedImages.length} selected'),
+      ],
+    ),
+    const SizedBox(height: 12),
+    _ReviewCard(
+      title: 'Transport',
+      icon: Icons.local_taxi_outlined,
+      onEdit: () => setState(() => _currentStep = 2),
+      rows: _requestTransport
+          ? [
+              ('Vehicle', _transportType),
+              ('Pickup', _transportPickupController.text),
+              ('Drop-off', _transportDropoffController.text),
+              ('Pickup time', _transportPickupTimeController.text),
+              if (_transportRouteEstimate != null)
+                (
+                  'Estimated fare',
+                  'R${_transportRouteEstimate!.estimatedFare.toStringAsFixed(0)}',
+                ),
+            ]
+          : const [('Request', 'No transport needed')],
+    ),
+  ];
+
+  Future<void> _pickDates() async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime.now(),
+      lastDate: DateTime(2030),
+      initialDateRange:
+          _selectedDateRange ??
+          DateTimeRange(
+            start: DateTime.now(),
+            end: DateTime.now().add(const Duration(days: 7)),
+          ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _selectedDateRange = picked;
+      _datesController.text =
+          '${dateFormat.format(picked.start)} - ${dateFormat.format(picked.end)}';
+    });
+  }
+
+  Future<void> _selectFriends() async {
+    final selected = await Navigator.push<List<Map<String, String>>>(
+      context,
+      MaterialPageRoute(builder: (_) => const FriendsSelectionPage()),
+    );
+    if (selected != null && mounted) {
+      setState(() => _invitedFriends = selected);
+    }
+  }
+
+  Future<void> _continueToNextStep() async {
+    if (_currentStep == 0) {
+      if (_destinationController.text.trim().isEmpty ||
+          _tripNameController.text.trim().isEmpty ||
+          _selectedDateRange == null ||
+          _budgetController.text.trim().isEmpty) {
+        _showStepMessage('Add a destination, dates, trip name, and budget.');
+        return;
+      }
+    }
+    if (_currentStep == 1 && !isSoloSelected) {
+      final groupSize = int.tryParse(_maxGroupSizeController.text);
+      if (groupSize == null || groupSize < 2) {
+        _showStepMessage('Group size must be at least 2.');
+        return;
+      }
+    }
+    if (_currentStep == 1 && _selectedImages.isEmpty) {
+      _showStepMessage('Add at least one trip photo.');
+      return;
+    }
+    if (_currentStep == 2 && _requestTransport) {
+      if (_transportPickupController.text.trim().isEmpty ||
+          _transportDropoffController.text.trim().isEmpty ||
+          _transportPickupTime == null) {
+        _showStepMessage('Add pickup, drop-off, and pickup time.');
+        return;
+      }
+      if (_transportRouteEstimate == null) await _estimateRoute();
+      if (_transportRouteEstimate == null) return;
+    }
+    if (mounted) setState(() => _currentStep++);
+  }
+
+  void _showStepMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _selectPickupTime() async {
@@ -831,6 +934,216 @@ class _BookingPageState extends State<BookingPage> {
       _transportPickupTimeController.text = pickedTime.format(context);
     });
   }
+}
+
+class _StepProgress extends StatelessWidget {
+  const _StepProgress({required this.currentStep, required this.labels});
+  final int currentStep;
+  final List<String> labels;
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 14),
+        child: Row(
+          children: List.generate(labels.length * 2 - 1, (index) {
+            if (index.isOdd) {
+              return Expanded(
+                child: Container(
+                  height: 3,
+                  color: index ~/ 2 < currentStep ? color : Colors.black12,
+                ),
+              );
+            }
+            final step = index ~/ 2;
+            final active = step <= currentStep;
+            return Semantics(
+              label: labels[step],
+              child: CircleAvatar(
+                radius: 14,
+                backgroundColor: active ? color : Colors.black12,
+                child: Text(
+                  '${step + 1}',
+                  style: TextStyle(
+                    color: active ? Colors.white : Colors.black45,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+  }
+}
+
+class _StepIntro extends StatelessWidget {
+  const _StepIntro({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+  final IconData icon;
+  final String title, subtitle;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 18),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(11),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: .1),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Icon(icon, color: Theme.of(context).colorScheme.primary),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ReviewCard extends StatelessWidget {
+  const _ReviewCard({
+    required this.title,
+    required this.icon,
+    required this.rows,
+    required this.onEdit,
+  });
+  final String title;
+  final IconData icon;
+  final List<(String, String)> rows;
+  final VoidCallback onEdit;
+  @override
+  Widget build(BuildContext context) => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(icon),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              TextButton(onPressed: onEdit, child: const Text('Edit')),
+            ],
+          ),
+          const Divider(),
+          ...rows.map(
+            (row) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      row.$1,
+                      style: const TextStyle(color: Colors.black54),
+                    ),
+                  ),
+                  Flexible(
+                    child: Text(
+                      row.$2,
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _PlannerFooter extends StatelessWidget {
+  const _PlannerFooter({
+    required this.currentStep,
+    required this.loading,
+    required this.onBack,
+    required this.onContinue,
+  });
+  final int currentStep;
+  final bool loading;
+  final VoidCallback? onBack, onContinue;
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Theme.of(context).colorScheme.surface,
+    elevation: 10,
+    child: SafeArea(
+      top: false,
+      minimum: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Row(
+        children: [
+          if (onBack != null) ...[
+            OutlinedButton(
+              onPressed: onBack,
+              style: OutlinedButton.styleFrom(minimumSize: const Size(92, 54)),
+              child: const Text('Back'),
+            ),
+            const SizedBox(width: 10),
+          ],
+          Expanded(
+            child: FilledButton.icon(
+              onPressed: onContinue,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(54),
+              ),
+              icon: loading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Icon(currentStep == 3 ? Icons.check : Icons.arrow_forward),
+              label: Text(
+                loading
+                    ? 'Creating trip…'
+                    : currentStep == 3
+                    ? 'Create trip'
+                    : 'Continue',
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _TripPhotoPicker extends StatelessWidget {

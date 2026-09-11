@@ -16,6 +16,7 @@ import 'package:riendzo/views/profile/ContactUsScreen.dart';
 import 'package:riendzo/views/profile/widgets/profile_card.dart';
 import 'package:riendzo/views/profile/widgets/profile_summary.dart';
 import 'package:riendzo/widgets/network_video_player.dart';
+import 'package:riendzo/widgets/riendzo_sliver_app_bar.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
 import '../../widgets/Shared Widgets/comments_popup.dart';
@@ -252,183 +253,194 @@ class _ProfileState extends State<Profile> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: FutureBuilder<Map<String, String>>(
-          future: _getUserData(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
+      body: NestedScrollView(
+        headerSliverBuilder: (context, innerBoxIsScrolled) => const [
+          RiendzoSliverAppBar(
+            title: 'Profile',
+            subtitle: 'Your trips, posts, and account',
+          ),
+        ],
+        body: SafeArea(
+          top: false,
+          child: FutureBuilder<Map<String, String>>(
+            future: _getUserData(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-            if (snapshot.hasError || !snapshot.hasData) {
-              return const Center(child: Text('Unable to load profile.'));
-            }
+              if (snapshot.hasError || !snapshot.hasData) {
+                return const Center(child: Text('Unable to load profile.'));
+              }
 
-            final userData = snapshot.data!;
-            final profilePicture =
-                _profilePictureUrl ?? userData['profilePicture'] ?? '';
+              final userData = snapshot.data!;
+              final profilePicture =
+                  _profilePictureUrl ?? userData['profilePicture'] ?? '';
 
-            return StreamBuilder<QuerySnapshot>(
-              stream: _firestore
-                  .collection('posts')
-                  .where('userId', isEqualTo: _currentUser?.uid)
-                  .orderBy('timestamp', descending: true)
-                  .snapshots(),
-              builder: (context, postsSnapshot) {
-                if (postsSnapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
+              return StreamBuilder<QuerySnapshot>(
+                stream: _firestore
+                    .collection('posts')
+                    .where('userId', isEqualTo: _currentUser?.uid)
+                    .orderBy('timestamp', descending: true)
+                    .snapshots(),
+                builder: (context, postsSnapshot) {
+                  if (postsSnapshot.connectionState ==
+                      ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
-                return FutureBuilder<List<PostModel>>(
-                  future: _getPostsWithLikes(postsSnapshot.data?.docs ?? []),
-                  builder: (context, futureSnapshot) {
-                    final posts = futureSnapshot.data ?? [];
+                  return FutureBuilder<List<PostModel>>(
+                    future: _getPostsWithLikes(postsSnapshot.data?.docs ?? []),
+                    builder: (context, futureSnapshot) {
+                      final posts = futureSnapshot.data ?? [];
 
-                    return ListView(
-                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-                      children: [
-                        _ProfileHeader(
-                          fullName: userData['fullName'] ?? 'Traveller',
-                          email: userData['email'] ?? '',
-                          profilePicture: profilePicture,
-                          onEditName: _showEditNameDialog,
-                          onAvatarTap: () =>
-                              _showProfileOptions(profilePicture),
-                          onInboxTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const Inbox(),
+                      return ListView(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+                        children: [
+                          _ProfileHeader(
+                            fullName: userData['fullName'] ?? 'Traveller',
+                            email: userData['email'] ?? '',
+                            profilePicture: profilePicture,
+                            onEditName: _showEditNameDialog,
+                            onAvatarTap: () =>
+                                _showProfileOptions(profilePicture),
+                            onInboxTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const Inbox(),
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 14),
+                          const ProfileSummary(),
+                          const SizedBox(height: 14),
+                          _ProfileActionSection(
+                            title: 'General',
+                            children: [
+                              ProfileCard(
+                                leadingIcon: const Icon(
+                                  Icons.notifications_none_rounded,
+                                ),
+                                textTitle: 'Notifications',
+                                trailingIcon: Icons.chevron_right_rounded,
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const NotificationsScreen(),
+                                    ),
+                                  );
+                                },
                               ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 14),
-                        const ProfileSummary(),
-                        const SizedBox(height: 14),
-                        _ProfileActionSection(
-                          title: 'General',
-                          children: [
-                            ProfileCard(
-                              leadingIcon: const Icon(
-                                Icons.notifications_none_rounded,
+                              ProfileCard(
+                                leadingIcon: const Icon(Icons.map_outlined),
+                                textTitle: 'My Trips',
+                                trailingIcon: Icons.chevron_right_rounded,
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => const MyTrips(),
+                                    ),
+                                  );
+                                },
                               ),
-                              textTitle: 'Notifications',
-                              trailingIcon: Icons.chevron_right_rounded,
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) =>
-                                        const NotificationsScreen(),
-                                  ),
-                                );
-                              },
-                            ),
-                            ProfileCard(
-                              leadingIcon: const Icon(Icons.map_outlined),
-                              textTitle: 'My Trips',
-                              trailingIcon: Icons.chevron_right_rounded,
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => const MyTrips(),
-                                  ),
-                                );
-                              },
-                            ),
-                            ProfileCard(
-                              leadingIcon: const Icon(
-                                Icons.account_balance_wallet,
+                              ProfileCard(
+                                leadingIcon: const Icon(
+                                  Icons.account_balance_wallet,
+                                ),
+                                textTitle: 'Wallet',
+                                trailingIcon: Icons.chevron_right_rounded,
+                                onTap: () => _showComingSoon('Wallet'),
                               ),
-                              textTitle: 'Wallet',
-                              trailingIcon: Icons.chevron_right_rounded,
-                              onTap: () => _showComingSoon('Wallet'),
-                            ),
-                            ProfileCard(
-                              leadingIcon: const Icon(Icons.people_outline),
-                              textTitle: 'Travellers',
-                              trailingIcon: Icons.chevron_right_rounded,
-                              onTap: () => _showComingSoon('Travellers'),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-                        _ProfileActionSection(
-                          title: 'Support',
-                          children: [
-                            ProfileCard(
-                              leadingIcon: const Icon(Icons.info_outline),
-                              textTitle: 'Legal Information',
-                              trailingIcon: Icons.chevron_right_rounded,
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) =>
-                                        LegalInformationScreen(),
-                                  ),
-                                );
-                              },
-                            ),
-                            ProfileCard(
-                              leadingIcon: const Icon(Icons.help_outline),
-                              textTitle: 'Help Center',
-                              trailingIcon: Icons.chevron_right_rounded,
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => SupportCenterScreen(),
-                                  ),
-                                );
-                              },
-                            ),
-                            ProfileCard(
-                              leadingIcon: const Icon(
-                                Icons.contact_support_outlined,
+                              ProfileCard(
+                                leadingIcon: const Icon(Icons.people_outline),
+                                textTitle: 'Travellers',
+                                trailingIcon: Icons.chevron_right_rounded,
+                                onTap: () => _showComingSoon('Travellers'),
                               ),
-                              textTitle: 'Contact Us',
-                              trailingIcon: Icons.chevron_right_rounded,
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => ContactUsScreen(),
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-                        ProfileCard(
-                          leadingIcon: const Icon(Icons.logout_rounded),
-                          textTitle: 'Logout',
-                          trailingIcon: Icons.chevron_right_rounded,
-                          onTap: signOut,
-                        ),
-                        const SizedBox(height: 22),
-                        Text(
-                          'Your Posts',
-                          style: Theme.of(context).textTheme.headlineMedium,
-                        ),
-                        const SizedBox(height: 10),
-                        if (futureSnapshot.connectionState ==
-                            ConnectionState.waiting)
-                          const Center(child: CircularProgressIndicator())
-                        else if (posts.isEmpty)
-                          const _EmptyPostsCard()
-                        else
-                          ...posts.map((post) => _buildPostItem(post)),
-                      ],
-                    );
-                  },
-                );
-              },
-            );
-          },
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          _ProfileActionSection(
+                            title: 'Support',
+                            children: [
+                              ProfileCard(
+                                leadingIcon: const Icon(Icons.info_outline),
+                                textTitle: 'Legal Information',
+                                trailingIcon: Icons.chevron_right_rounded,
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          LegalInformationScreen(),
+                                    ),
+                                  );
+                                },
+                              ),
+                              ProfileCard(
+                                leadingIcon: const Icon(Icons.help_outline),
+                                textTitle: 'Help Center',
+                                trailingIcon: Icons.chevron_right_rounded,
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          SupportCenterScreen(),
+                                    ),
+                                  );
+                                },
+                              ),
+                              ProfileCard(
+                                leadingIcon: const Icon(
+                                  Icons.contact_support_outlined,
+                                ),
+                                textTitle: 'Contact Us',
+                                trailingIcon: Icons.chevron_right_rounded,
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => ContactUsScreen(),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          ProfileCard(
+                            leadingIcon: const Icon(Icons.logout_rounded),
+                            textTitle: 'Logout',
+                            trailingIcon: Icons.chevron_right_rounded,
+                            onTap: signOut,
+                          ),
+                          const SizedBox(height: 22),
+                          Text(
+                            'Your Posts',
+                            style: Theme.of(context).textTheme.headlineMedium,
+                          ),
+                          const SizedBox(height: 10),
+                          if (futureSnapshot.connectionState ==
+                              ConnectionState.waiting)
+                            const Center(child: CircularProgressIndicator())
+                          else if (posts.isEmpty)
+                            const _EmptyPostsCard()
+                          else
+                            ...posts.map((post) => _buildPostItem(post)),
+                        ],
+                      );
+                    },
+                  );
+                },
+              );
+            },
+          ),
         ),
       ),
     );

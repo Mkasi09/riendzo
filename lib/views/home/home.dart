@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../widgets/Shared Widgets/home_avatars_row.dart';
+import '../../widgets/riendzo_sliver_app_bar.dart';
 import '../my_trips/booking/booking_page.dart';
 import '../trips/trips.dart';
 
@@ -10,9 +11,26 @@ class Home extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Scaffold(
-        backgroundColor: Theme.of(context).colorScheme.surface,
+    return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      body: NestedScrollView(
+        headerSliverBuilder: (context, innerBoxIsScrolled) => [
+          RiendzoSliverAppBar(
+            title: 'Riendzo',
+            subtitle: 'Discover your next trip',
+            actions: [
+              IconButton(
+                tooltip: 'Create trip',
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BookingPage()),
+                ),
+                icon: const Icon(Icons.add_circle_outline_rounded),
+              ),
+              const SizedBox(width: 8),
+            ],
+          ),
+        ],
         body: StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance.collection('trips').snapshots(),
           builder: (context, snapshot) {

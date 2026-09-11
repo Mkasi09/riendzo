@@ -19,7 +19,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.11.4
+  sdk: ^3.11.0
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -59,6 +59,9 @@ dependencies:
   flutter_typeahead: ^5.2.0
   http: ^1.2.2
   video_compress: ^3.1.4
+  url_launcher: 6.3.2
+  visibility_detector: ^0.4.0+2
+  flutter_cache_manager: ^3.4.2
 
 dev_dependencies:
   flutter_test:

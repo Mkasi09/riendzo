@@ -29,7 +29,9 @@ class TransportRouteEstimator {
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters',
+        'X-Goog-FieldMask':
+            'routes.duration,routes.distanceMeters,'
+            'routes.legs.startLocation,routes.legs.endLocation',
       },
       body: jsonEncode({
         'origin': {'address': pickup},
@@ -57,7 +59,14 @@ class TransportRouteEstimator {
     final route = routes.first as Map<String, dynamic>;
     final distanceMeters = (route['distanceMeters'] as num?)?.toDouble();
     final durationSeconds = _parseDurationSeconds(route['duration'] as String?);
-    if (distanceMeters == null || durationSeconds == null) {
+    final legs = route['legs'] as List<dynamic>? ?? [];
+    final leg = legs.isEmpty ? null : legs.first as Map<String, dynamic>;
+    final start = _latLng(leg?['startLocation']);
+    final end = _latLng(leg?['endLocation']);
+    if (distanceMeters == null ||
+        durationSeconds == null ||
+        start == null ||
+        end == null) {
       throw const TransportRouteException('Route estimate was incomplete.');
     }
     final distanceKm = distanceMeters / 1000;
@@ -71,7 +80,20 @@ class TransportRouteEstimator {
         distanceKm: distanceKm,
         durationMinutes: durationMinutes,
       ),
+      pickupLatitude: start.$1,
+      pickupLongitude: start.$2,
+      dropoffLatitude: end.$1,
+      dropoffLongitude: end.$2,
     );
+  }
+
+  static (double, double)? _latLng(Object? location) {
+    if (location is! Map<String, dynamic>) return null;
+    final latLng = location['latLng'];
+    if (latLng is! Map<String, dynamic>) return null;
+    final latitude = (latLng['latitude'] as num?)?.toDouble();
+    final longitude = (latLng['longitude'] as num?)?.toDouble();
+    return latitude == null || longitude == null ? null : (latitude, longitude);
   }
 
   static int? _parseDurationSeconds(String? duration) {

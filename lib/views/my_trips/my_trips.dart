@@ -7,6 +7,7 @@ import 'package:riendzo/views/my_trips/trip_details.dart';
 import '../../widgets/Shared Widgets/button_with_icon.dart';
 import '../../widgets/Shared Widgets/one_image_card.dart';
 import '../../widgets/screen_sections.dart';
+import '../../widgets/riendzo_sliver_app_bar.dart';
 import 'booking/booking_page.dart';
 
 class MyTrips extends StatelessWidget {
@@ -31,62 +32,83 @@ class MyTrips extends StatelessWidget {
     }
 
     return Scaffold(
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-          children: [
-            Text('My Trips', style: Theme.of(context).textTheme.displayMedium),
-            const SizedBox(height: 6),
-            Text(
-              'Plan, edit, and revisit your travel plans.',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 18),
-            ButtonWithIcon(
-              iconData: Icons.add_rounded,
-              iconColor: Colors.white,
-              cardColor: Theme.of(context).colorScheme.primary,
-              textColor: Colors.white,
-              text: "Create Trip",
-              horizontalPadding: 0,
-              verticalPadding: 4,
-              onPressed: () {
-                Navigator.push(
+      body: NestedScrollView(
+        headerSliverBuilder: (context, innerBoxIsScrolled) => [
+          RiendzoSliverAppBar(
+            title: 'My trips',
+            subtitle: 'Plan, manage, and revisit your journeys',
+            automaticallyImplyLeading: true,
+            actions: [
+              IconButton(
+                tooltip: 'Create trip',
+                onPressed: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const BookingPage()),
-                );
-              },
-              TextSize: 15,
-            ),
-            const SizedBox(height: 18),
-            const Sections(
-              sectionName: 'Your Ongoing Trips',
-              trailingText: '',
-              veritcalMargin: 10,
-            ),
-            _TripStream(
-              query: FirebaseFirestore.instance
-                  .collection('trips')
-                  .where('userId', isEqualTo: user.uid)
-                  .where('status', isEqualTo: 'ongoing'),
-              emptyText: 'No ongoing trips yet. Start one above.',
-              horizontal: true,
-            ),
-            const SizedBox(height: 18),
-            const Sections(
-              sectionName: 'Past Trips',
-              trailingText: '',
-              veritcalMargin: 10,
-            ),
-            _TripStream(
-              query: FirebaseFirestore.instance
-                  .collection('trips')
-                  .where('userId', isEqualTo: user.uid)
-                  .where('status', isEqualTo: 'completed'),
-              emptyText: 'Completed trips will appear here.',
-              horizontal: false,
-            ),
-          ],
+                  MaterialPageRoute(builder: (_) => const BookingPage()),
+                ),
+                icon: const Icon(Icons.add_circle_outline_rounded),
+              ),
+              const SizedBox(width: 8),
+            ],
+          ),
+        ],
+        body: SafeArea(
+          top: false,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
+            children: [
+              Text(
+                'Plan, edit, and revisit your travel plans.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 18),
+              ButtonWithIcon(
+                iconData: Icons.add_rounded,
+                iconColor: Colors.white,
+                cardColor: Theme.of(context).colorScheme.primary,
+                textColor: Colors.white,
+                text: "Create Trip",
+                horizontalPadding: 0,
+                verticalPadding: 4,
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const BookingPage(),
+                    ),
+                  );
+                },
+                TextSize: 15,
+              ),
+              const SizedBox(height: 18),
+              const Sections(
+                sectionName: 'Your Ongoing Trips',
+                trailingText: '',
+                veritcalMargin: 10,
+              ),
+              _TripStream(
+                query: FirebaseFirestore.instance
+                    .collection('trips')
+                    .where('userId', isEqualTo: user.uid)
+                    .where('status', isEqualTo: 'ongoing'),
+                emptyText: 'No ongoing trips yet. Start one above.',
+                horizontal: true,
+              ),
+              const SizedBox(height: 18),
+              const Sections(
+                sectionName: 'Past Trips',
+                trailingText: '',
+                veritcalMargin: 10,
+              ),
+              _TripStream(
+                query: FirebaseFirestore.instance
+                    .collection('trips')
+                    .where('userId', isEqualTo: user.uid)
+                    .where('status', isEqualTo: 'completed'),
+                emptyText: 'Completed trips will appear here.',
+                horizontal: false,
+              ),
+            ],
+          ),
         ),
       ),
     );

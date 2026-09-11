@@ -3,13 +3,18 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart' as rtdb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:riendzo/services/currency_formatter.dart';
 import 'package:riendzo/services/user_notification_service.dart';
+import 'package:riendzo/views/my_trips/itinerary_editor_screen.dart';
 import 'package:riendzo/views/profile/user_profile_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../widgets/Shared Widgets/comments_popup.dart';
 import '../../widgets/Shared Widgets/navigate_to_edit_trip.dart';
+
+enum _TripDetailSection { overview, itinerary, people, transport }
 
 class TripDetailScreen extends StatefulWidget {
   final String tripId;
@@ -25,12 +30,35 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   int likeCount = 0;
   int commentCount = 0;
   int selectedImageIndex = 0;
+  bool isSaved = false;
+  _TripDetailSection selectedSection = _TripDetailSection.overview;
+  final overviewKey = GlobalKey();
+  final itineraryKey = GlobalKey();
+  final peopleKey = GlobalKey();
+  final transportKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
     _getLikeStatus();
     _refreshCommentCount();
+    _loadSavedState();
+  }
+
+  Future<void> _loadSavedState() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('savedTrips')
+          .doc(widget.tripId)
+          .get();
+      if (mounted) setState(() => isSaved = snapshot.exists);
+    } catch (_) {
+      // Saving is optional; trip details remain usable without it.
+    }
   }
 
   Future<void> _getLikeStatus() async {
@@ -335,101 +363,219 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
             selectedImageIndex = images.length - 1;
           }
 
-          return CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(
-                child: _ImmersiveTripHeader(
-                  images: images,
-                  selectedIndex: selectedImageIndex,
-                  tripName: tripName,
-                  destination: destination,
-                  status: status,
-                  isOwner: isOwner,
-                  onBack: () => Navigator.pop(context),
-                  onEdit: () => _navigateToEditTrip(context, widget.tripId),
-                  onDelete: _confirmDeleteTrip,
-                  onSelectPhoto: (index) =>
-                      setState(() => selectedImageIndex = index),
-                ),
-              ),
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 22, 20, 34),
-                sliver: SliverList(
-                  delegate: SliverChildListDelegate([
-                    _EngagementPanel(
-                      isLiked: isLiked,
-                      likeCount: likeCount,
-                      commentCount: commentCount,
-                      onLike: _toggleLike,
-                      onComments: () => _showCommentsPopup(context),
-                    ),
-                    const SizedBox(height: 16),
-                    _TripStoryCard(
-                      title: tripName,
+          return Stack(
+            children: [
+              CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: _ImmersiveTripHeader(
+                      images: images,
+                      selectedIndex: selectedImageIndex,
+                      tripName: tripName,
                       destination: destination,
-                      description: description,
+                      status: status,
+                      isOwner: isOwner,
+                      onBack: () => Navigator.pop(context),
+                      onEdit: () => _navigateToEditTrip(context, widget.tripId),
+                      onDelete: _confirmDeleteTrip,
+                      onSelectPhoto: (index) =>
+                          setState(() => selectedImageIndex = index),
                     ),
-                    const SizedBox(height: 16),
-                    _DateJourneyCard(
-                      startDate: startDate,
-                      endDate: endDate,
-                      rawStartDate: rawStartDate,
-                      rawEndDate: rawEndDate,
+                  ),
+                  SliverPersistentHeader(
+                    pinned: true,
+                    delegate: _TripSectionHeaderDelegate(
+                      child: _TripSectionNavigation(
+                        selected: selectedSection,
+                        hasTransport: transport != null,
+                        onSelected: _scrollToSection,
+                      ),
                     ),
-                    const SizedBox(height: 16),
-                    _TripFactsBox(
-                      items: [
-                        _HighlightData(
-                          icon: Icons.payments_outlined,
-                          label: 'Price',
-                          value: budget,
-                        ),
-                        _HighlightData(
-                          icon: Icons.group_outlined,
-                          label: 'Group size',
-                          value: '$currentGroupSize/$maxGroupSize going',
-                        ),
-                        _HighlightData(
-                          icon: Icons.explore_outlined,
-                          label: 'Travel type',
-                          value: tripType,
-                        ),
-                        _HighlightData(
-                          icon: Icons.interests_outlined,
-                          label: 'Interest',
-                          value: interest,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    _TripPeoplePanel(tripData: data),
-                    if (currentUser != null) ...[
-                      const SizedBox(height: 16),
-                      if (isOwner)
-                        _OwnerJoinRequestsPanel(
-                          tripId: widget.tripId,
-                          currentGroupSize: currentGroupSize,
-                          maxGroupSize: maxGroupSize,
-                          onApprove: _approveJoinRequest,
-                          onDecline: _declineJoinRequest,
-                        )
-                      else
-                        _JoinTripRequestPanel(
-                          tripId: widget.tripId,
-                          isFull: isFull,
-                          isParticipant: currentUserIsParticipant,
-                          inviteStatus: currentUserInviteStatus,
-                          onRequestJoin: () => _requestToJoinTrip(
-                            tripName: tripName,
-                            ownerId: data['userId']?.toString() ?? '',
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 22, 20, 124),
+                    sliver: SliverList(
+                      delegate: SliverChildListDelegate([
+                        KeyedSubtree(
+                          key: overviewKey,
+                          child: _TripAtAGlance(
+                            startDate: rawStartDate,
+                            endDate: rawEndDate,
+                            currentGroupSize: currentGroupSize,
+                            maxGroupSize: maxGroupSize,
+                            budget: budget,
+                            status: status,
                           ),
                         ),
-                    ],
-                    if (transport != null) ...[
-                      const SizedBox(height: 16),
-                      _TransportCard(transport: transport),
-                    ],
-                  ]),
+                        const SizedBox(height: 16),
+                        _EngagementPanel(
+                          isLiked: isLiked,
+                          likeCount: likeCount,
+                          commentCount: commentCount,
+                          onLike: _toggleLike,
+                          onComments: () => _showCommentsPopup(context),
+                        ),
+                        const SizedBox(height: 16),
+                        _TripStoryCard(
+                          title: tripName,
+                          destination: destination,
+                          description: description,
+                        ),
+                        const SizedBox(height: 16),
+                        _DateJourneyCard(
+                          startDate: startDate,
+                          endDate: endDate,
+                          rawStartDate: rawStartDate,
+                          rawEndDate: rawEndDate,
+                        ),
+                        const SizedBox(height: 16),
+                        KeyedSubtree(
+                          key: itineraryKey,
+                          child: _ItineraryTimeline(
+                            itinerary: data['itinerary'],
+                            isOwner: isOwner,
+                            onEdit: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ItineraryEditorScreen(
+                                  tripId: widget.tripId,
+                                  initialItinerary: data['itinerary'],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _TripFactsBox(
+                          items: [
+                            _HighlightData(
+                              icon: Icons.payments_outlined,
+                              label: 'Price',
+                              value: budget,
+                            ),
+                            _HighlightData(
+                              icon: Icons.group_outlined,
+                              label: 'Group size',
+                              value: '$currentGroupSize/$maxGroupSize going',
+                            ),
+                            _HighlightData(
+                              icon: Icons.explore_outlined,
+                              label: 'Travel type',
+                              value: tripType,
+                            ),
+                            _HighlightData(
+                              icon: Icons.interests_outlined,
+                              label: 'Interest',
+                              value: interest,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        _TripCostBreakdown(
+                          data: data,
+                          currentGroupSize: currentGroupSize,
+                        ),
+                        const SizedBox(height: 16),
+                        KeyedSubtree(
+                          key: peopleKey,
+                          child: _TripPeoplePanel(tripData: data),
+                        ),
+                        if (currentUser != null) ...[
+                          const SizedBox(height: 16),
+                          if (isOwner)
+                            _OwnerJoinRequestsPanel(
+                              tripId: widget.tripId,
+                              currentGroupSize: currentGroupSize,
+                              maxGroupSize: maxGroupSize,
+                              onApprove: _approveJoinRequest,
+                              onDecline: _declineJoinRequest,
+                            )
+                          else
+                            _JoinTripRequestPanel(
+                              tripId: widget.tripId,
+                              isFull: isFull,
+                              isParticipant: currentUserIsParticipant,
+                              inviteStatus: currentUserInviteStatus,
+                              onRequestJoin: () => _requestToJoinTrip(
+                                tripName: tripName,
+                                ownerId: data['userId']?.toString() ?? '',
+                              ),
+                            ),
+                        ],
+                        if (transport != null) ...[
+                          const SizedBox(height: 16),
+                          KeyedSubtree(
+                            key: transportKey,
+                            child: Column(
+                              children: [
+                                _TripRouteMapCard(
+                                  destination: destination,
+                                  transport: transport,
+                                  onOpenMap: () => _openRouteMap(
+                                    destination: destination,
+                                    transport: transport,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                _TransportCard(transport: transport),
+                              ],
+                            ),
+                          ),
+                        ] else ...[
+                          KeyedSubtree(
+                            key: transportKey,
+                            child: _TripRouteMapCard(
+                              destination: destination,
+                              onOpenMap: () =>
+                                  _openRouteMap(destination: destination),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        _TravellerTools(
+                          isSaved: isSaved,
+                          onSave: _toggleSavedTrip,
+                          onShare: () => _shareTrip(tripName),
+                          onCalendar: () => _addToCalendar(
+                            tripName: tripName,
+                            destination: destination,
+                            startDate: rawStartDate,
+                            endDate: rawEndDate,
+                          ),
+                          onHost: () => _openHostProfile(
+                            data['userId']?.toString() ?? '',
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ),
+                ],
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _ContextualTripActionBar(
+                  tripId: widget.tripId,
+                  isOwner: isOwner,
+                  isParticipant: currentUserIsParticipant,
+                  isFull: isFull,
+                  hasActiveTransport:
+                      transport != null &&
+                      ![
+                        'completed',
+                        'cancelled',
+                      ].contains(transport['status']?.toString()),
+                  onManage: () => _navigateToEditTrip(context, widget.tripId),
+                  onDiscuss: () => _showCommentsPopup(context),
+                  onNavigate: () => _openRouteMap(
+                    destination: destination,
+                    transport: transport,
+                  ),
+                  onJoin: () => _requestToJoinTrip(
+                    tripName: tripName,
+                    ownerId: data['userId']?.toString() ?? '',
+                  ),
                 ),
               ),
             ],
@@ -437,6 +583,133 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         },
       ),
     );
+  }
+
+  void _scrollToSection(_TripDetailSection section) {
+    setState(() => selectedSection = section);
+    final key = switch (section) {
+      _TripDetailSection.overview => overviewKey,
+      _TripDetailSection.itinerary => itineraryKey,
+      _TripDetailSection.people => peopleKey,
+      _TripDetailSection.transport => transportKey,
+    };
+    final targetContext = key.currentContext;
+    if (targetContext == null) return;
+    Scrollable.ensureVisible(
+      targetContext,
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+      alignment: 0.08,
+    );
+  }
+
+  Future<void> _toggleSavedTrip() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final wasSaved = isSaved;
+    setState(() => isSaved = !wasSaved);
+    final reference = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('savedTrips')
+        .doc(widget.tripId);
+    try {
+      if (wasSaved) {
+        await reference.delete();
+      } else {
+        await reference.set({
+          'tripId': widget.tripId,
+          'savedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => isSaved = wasSaved);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not update saved trips.')),
+      );
+    }
+  }
+
+  Future<void> _shareTrip(String tripName) async {
+    await Clipboard.setData(
+      ClipboardData(
+        text: '$tripName · https://riendzo.app/trips/${widget.tripId}',
+      ),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Trip link copied.')));
+  }
+
+  void _openHostProfile(String hostId) {
+    if (hostId.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => UserProfileScreen(userId: hostId)),
+    );
+  }
+
+  Future<void> _addToCalendar({
+    required String tripName,
+    required String destination,
+    required String startDate,
+    required String endDate,
+  }) async {
+    try {
+      final input = DateFormat('dd/MM/yyyy');
+      final output = DateFormat('yyyyMMdd');
+      final start = input.parseStrict(startDate);
+      final end = input.parseStrict(endDate).add(const Duration(days: 1));
+      final uri = Uri.https('calendar.google.com', '/calendar/render', {
+        'action': 'TEMPLATE',
+        'text': tripName,
+        'dates': '${output.format(start)}/${output.format(end)}',
+        'location': destination,
+        'details': 'Riendzo trip ${widget.tripId}',
+      });
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Trip dates are not available yet.')),
+      );
+    }
+  }
+
+  Future<void> _openRouteMap({
+    required String destination,
+    Map<String, dynamic>? transport,
+  }) async {
+    String endpoint(String coordinateKey, String addressKey, String fallback) {
+      final coordinates = transport?[coordinateKey];
+      if (coordinates is Map) {
+        final latitude = coordinates['latitude'];
+        final longitude = coordinates['longitude'];
+        if (latitude is num && longitude is num) {
+          return '$latitude,$longitude';
+        }
+      }
+      final address = transport?[addressKey]?.toString().trim() ?? '';
+      return address.isEmpty ? fallback : address;
+    }
+
+    final origin = endpoint('pickupCoordinates', 'pickup', '');
+    final dropoff = endpoint('dropoffCoordinates', 'dropoff', destination);
+    final parameters = <String, String>{
+      'api': '1',
+      'destination': dropoff,
+      'travelmode': 'driving',
+    };
+    if (origin.isNotEmpty) parameters['origin'] = origin;
+    final uri = Uri.https('www.google.com', '/maps/dir/', parameters);
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open navigation.')),
+      );
+    }
   }
 
   String _formatDate(String? date) {
@@ -975,6 +1248,240 @@ class _HeroBadge extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TripSectionHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final Widget child;
+
+  const _TripSectionHeaderDelegate({required this.child});
+
+  @override
+  double get minExtent => 64;
+
+  @override
+  double get maxExtent => 64;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      elevation: overlapsContent ? 3 : 0,
+      shadowColor: Colors.black26,
+      child: child,
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _TripSectionHeaderDelegate oldDelegate) => true;
+}
+
+class _TripSectionNavigation extends StatelessWidget {
+  final _TripDetailSection selected;
+  final bool hasTransport;
+  final ValueChanged<_TripDetailSection> onSelected;
+
+  const _TripSectionNavigation({
+    required this.selected,
+    required this.hasTransport,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      children: [
+        _chip(
+          'Overview',
+          Icons.dashboard_outlined,
+          _TripDetailSection.overview,
+        ),
+        _chip('Itinerary', Icons.route_outlined, _TripDetailSection.itinerary),
+        _chip('People', Icons.group_outlined, _TripDetailSection.people),
+        _chip(
+          hasTransport ? 'Transport' : 'Map',
+          Icons.map_outlined,
+          _TripDetailSection.transport,
+        ),
+      ],
+    );
+  }
+
+  Widget _chip(String label, IconData icon, _TripDetailSection section) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        avatar: Icon(icon, size: 17),
+        label: Text(label),
+        selected: selected == section,
+        onSelected: (_) => onSelected(section),
+      ),
+    );
+  }
+}
+
+class _TripAtAGlance extends StatelessWidget {
+  final String startDate;
+  final String endDate;
+  final int currentGroupSize;
+  final int maxGroupSize;
+  final String budget;
+  final String status;
+
+  const _TripAtAGlance({
+    required this.startDate,
+    required this.endDate,
+    required this.currentGroupSize,
+    required this.maxGroupSize,
+    required this.budget,
+    required this.status,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final spaces = (maxGroupSize - currentGroupSize).clamp(0, 99);
+    return _SurfacePanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _countdownLabel(),
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$startDate – $endDate',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
+              _StatusPill(status: status),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: _GlanceItem(
+                  icon: Icons.payments_outlined,
+                  label: 'Estimated',
+                  value: budget,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _GlanceItem(
+                  icon: Icons.event_available_outlined,
+                  label: 'Availability',
+                  value: spaces == 0 ? 'Trip full' : '$spaces spaces open',
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _countdownLabel() {
+    try {
+      final start = DateFormat('dd/MM/yyyy').parseStrict(startDate);
+      final today = DateTime.now();
+      final difference = DateTime(
+        start.year,
+        start.month,
+        start.day,
+      ).difference(DateTime(today.year, today.month, today.day)).inDays;
+      if (difference == 0) return 'Starts today';
+      if (difference == 1) return 'Starts tomorrow';
+      if (difference > 1) return 'Starts in $difference days';
+      return 'Trip started ${difference.abs()} days ago';
+    } catch (_) {
+      return 'Trip at a glance';
+    }
+  }
+}
+
+class _GlanceItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _GlanceItem({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: Theme.of(context).colorScheme.primary, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: Theme.of(context).textTheme.bodySmall),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  final String status;
+
+  const _StatusPill({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+        child: Text(
+          status.toUpperCase(),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.secondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w900,
+          ),
         ),
       ),
     );
@@ -1983,6 +2490,491 @@ class _JoinIcon extends StatelessWidget {
   }
 }
 
+class _ItineraryTimeline extends StatelessWidget {
+  final dynamic itinerary;
+  final bool isOwner;
+  final VoidCallback onEdit;
+
+  const _ItineraryTimeline({
+    required this.itinerary,
+    required this.isOwner,
+    required this.onEdit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final stops = itinerary is List
+        ? (itinerary as List).whereType<Map>().toList()
+        : const <Map>[];
+    return _SurfacePanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const _JoinIcon(icon: Icons.route_outlined),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Itinerary',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              if (isOwner)
+                TextButton.icon(
+                  onPressed: onEdit,
+                  icon: const Icon(Icons.edit_outlined, size: 17),
+                  label: Text(stops.isEmpty ? 'Add' : 'Edit'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (stops.isEmpty)
+            Text(
+              isOwner
+                  ? 'Add daily activities, times, and meeting points so everyone knows the plan.'
+                  : 'The host has not published an itinerary yet.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            )
+          else
+            for (var index = 0; index < stops.length; index++)
+              _ItineraryStop(
+                index: index,
+                data: Map<String, dynamic>.from(stops[index]),
+                isLast: index == stops.length - 1,
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ItineraryStop extends StatelessWidget {
+  final int index;
+  final Map<String, dynamic> data;
+  final bool isLast;
+
+  const _ItineraryStop({
+    required this.index,
+    required this.data,
+    required this.isLast,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final title = (data['title'] ?? data['activity'] ?? 'Planned activity')
+        .toString();
+    final time = (data['time'] ?? data['date'] ?? 'Time to be confirmed')
+        .toString();
+    final place = (data['location'] ?? data['meetingPoint'] ?? '').toString();
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 38,
+            child: Column(
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  child: Text(
+                    '${index + 1}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                if (!isLast)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.primary.withValues(alpha: 0.2),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: isLast ? 0 : 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 3),
+                  Text(time, style: Theme.of(context).textTheme.bodyMedium),
+                  if (place.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(place, style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TripCostBreakdown extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final int currentGroupSize;
+
+  const _TripCostBreakdown({
+    required this.data,
+    required this.currentGroupSize,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final transport = data['transport'] is Map
+        ? Map<String, dynamic>.from(data['transport'] as Map)
+        : const <String, dynamic>{};
+    final breakdown = data['costBreakdown'] is Map
+        ? Map<String, dynamic>.from(data['costBreakdown'] as Map)
+        : const <String, dynamic>{};
+    final budget = CurrencyFormatter.formatRand(data['budget']);
+    final fare = transport['estimatedFare'];
+    final deposit = data['deposit'] ?? breakdown['deposit'];
+    final perTraveller = _perTraveller(data['budget'], currentGroupSize);
+
+    return _SurfacePanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const _JoinIcon(icon: Icons.receipt_long_outlined),
+              const SizedBox(width: 12),
+              Text(
+                'Cost breakdown',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _CostRow(label: 'Estimated trip budget', value: budget),
+          if (fare != null)
+            _CostRow(
+              label: 'Transport estimate',
+              value: CurrencyFormatter.formatRand(fare),
+            ),
+          if (breakdown['accommodation'] != null)
+            _CostRow(
+              label: 'Accommodation',
+              value: CurrencyFormatter.formatRand(breakdown['accommodation']),
+            ),
+          if (breakdown['activities'] != null)
+            _CostRow(
+              label: 'Activities',
+              value: CurrencyFormatter.formatRand(breakdown['activities']),
+            ),
+          if (deposit != null)
+            _CostRow(
+              label: 'Deposit',
+              value: CurrencyFormatter.formatRand(deposit),
+            ),
+          if (perTraveller != null)
+            _CostRow(label: 'About per traveller', value: perTraveller),
+          const SizedBox(height: 8),
+          Text(
+            'Estimates may change until bookings are confirmed.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String? _perTraveller(dynamic raw, int people) {
+    final number = raw is num
+        ? raw.toDouble()
+        : double.tryParse(
+            raw?.toString().replaceAll(RegExp(r'[^0-9.]'), '') ?? '',
+          );
+    if (number == null || people <= 0) return null;
+    return CurrencyFormatter.formatRand(number / people);
+  }
+}
+
+class _CostRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _CostRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        children: [
+          Expanded(child: Text(label)),
+          const SizedBox(width: 12),
+          Text(value, style: Theme.of(context).textTheme.titleSmall),
+        ],
+      ),
+    );
+  }
+}
+
+class _TripRouteMapCard extends StatelessWidget {
+  final String destination;
+  final Map<String, dynamic>? transport;
+  final VoidCallback onOpenMap;
+
+  const _TripRouteMapCard({
+    required this.destination,
+    this.transport,
+    required this.onOpenMap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pickup = transport?['pickup']?.toString().trim() ?? '';
+    final dropoff = transport?['dropoff']?.toString().trim() ?? destination;
+    return _SurfacePanel(
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          Container(
+            height: 150,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Theme.of(context).colorScheme.primaryContainer,
+                  Theme.of(context).colorScheme.secondaryContainer,
+                ],
+              ),
+            ),
+            child: Stack(
+              children: [
+                const Positioned.fill(
+                  child: Icon(
+                    Icons.map_outlined,
+                    size: 92,
+                    color: Colors.white54,
+                  ),
+                ),
+                Positioned(
+                  left: 18,
+                  right: 18,
+                  bottom: 16,
+                  child: FilledButton.icon(
+                    onPressed: onOpenMap,
+                    icon: const Icon(Icons.navigation_rounded),
+                    label: const Text('Open live route'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              children: [
+                if (pickup.isNotEmpty)
+                  _RouteLine(label: 'Pickup', value: pickup, active: true),
+                _RouteLine(
+                  label: pickup.isEmpty ? 'Destination' : 'Dropoff',
+                  value: dropoff,
+                  active: false,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TravellerTools extends StatelessWidget {
+  final bool isSaved;
+  final VoidCallback onSave;
+  final VoidCallback onShare;
+  final VoidCallback onCalendar;
+  final VoidCallback onHost;
+
+  const _TravellerTools({
+    required this.isSaved,
+    required this.onSave,
+    required this.onShare,
+    required this.onCalendar,
+    required this.onHost,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _SurfacePanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Traveller tools',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ActionChip(
+                avatar: Icon(
+                  isSaved
+                      ? Icons.bookmark_rounded
+                      : Icons.bookmark_border_rounded,
+                ),
+                label: Text(isSaved ? 'Saved' : 'Save'),
+                onPressed: onSave,
+              ),
+              ActionChip(
+                avatar: const Icon(Icons.ios_share_rounded),
+                label: const Text('Share'),
+                onPressed: onShare,
+              ),
+              ActionChip(
+                avatar: const Icon(Icons.calendar_month_outlined),
+                label: const Text('Calendar'),
+                onPressed: onCalendar,
+              ),
+              ActionChip(
+                avatar: const Icon(Icons.verified_user_outlined),
+                label: const Text('View host'),
+                onPressed: onHost,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ContextualTripActionBar extends StatelessWidget {
+  final String tripId;
+  final bool isOwner;
+  final bool isParticipant;
+  final bool isFull;
+  final bool hasActiveTransport;
+  final VoidCallback onManage;
+  final VoidCallback onDiscuss;
+  final VoidCallback onNavigate;
+  final Future<void> Function() onJoin;
+
+  const _ContextualTripActionBar({
+    required this.tripId,
+    required this.isOwner,
+    required this.isParticipant,
+    required this.isFull,
+    required this.hasActiveTransport,
+    required this.onManage,
+    required this.onDiscuss,
+    required this.onNavigate,
+    required this.onJoin,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      minimum: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+      child: Material(
+        elevation: 10,
+        shadowColor: Colors.black38,
+        borderRadius: BorderRadius.circular(20),
+        color: Theme.of(context).colorScheme.surface,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            children: [
+              if (hasActiveTransport) ...[
+                IconButton.filledTonal(
+                  tooltip: 'Navigate',
+                  onPressed: onNavigate,
+                  icon: const Icon(Icons.navigation_rounded),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Expanded(child: _primaryAction(context)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _primaryAction(BuildContext context) {
+    if (isOwner) {
+      return FilledButton.icon(
+        onPressed: onManage,
+        icon: const Icon(Icons.tune_rounded),
+        label: const Text('Manage trip'),
+      );
+    }
+    if (isParticipant) {
+      return FilledButton.icon(
+        onPressed: onDiscuss,
+        icon: const Icon(Icons.forum_outlined),
+        label: const Text('Open trip discussion'),
+      );
+    }
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) {
+      return const FilledButton(
+        onPressed: null,
+        child: Text('Sign in to join'),
+      );
+    }
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('trips')
+          .doc(tripId)
+          .collection('joinRequests')
+          .doc(userId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data() as Map<String, dynamic>?;
+        final status = data?['status']?.toString() ?? '';
+        final pending = status == 'pending';
+        final approved = status == 'approved';
+        return FilledButton.icon(
+          onPressed: pending || approved || isFull ? null : onJoin,
+          icon: Icon(
+            approved
+                ? Icons.check_circle_outline_rounded
+                : pending
+                ? Icons.hourglass_top_rounded
+                : Icons.group_add_outlined,
+          ),
+          label: Text(
+            approved
+                ? 'Request approved'
+                : pending
+                ? 'Request pending'
+                : isFull
+                ? 'Trip is full'
+                : status == 'declined'
+                ? 'Request again'
+                : 'Request to join',
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _TransportCard extends StatelessWidget {
   final Map<String, dynamic> transport;
 
@@ -1991,6 +2983,13 @@ class _TransportCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = (transport['status'] ?? 'requested').toString();
+    final statusLabel = switch (status) {
+      'accepted' => 'Driver assigned',
+      'pickupArrived' => 'Driver at pickup',
+      'inProgress' => 'Trip in progress',
+      'completed' => 'Trip completed',
+      _ => 'Finding a driver',
+    };
     final type = (transport['type'] ?? 'Standard').toString();
     final pickup = (transport['pickup'] ?? 'Not set').toString();
     final dropoff = (transport['dropoff'] ?? 'Not set').toString();
@@ -2025,7 +3024,7 @@ class _TransportCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Transport $status',
+                      statusLabel,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleMedium,
@@ -2043,6 +3042,8 @@ class _TransportCard extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 16),
+          _TransportProgress(status: status),
           const SizedBox(height: 16),
           _RouteLine(label: 'Pickup', value: pickup, active: true),
           _RouteLine(label: 'Dropoff', value: dropoff, active: false),
@@ -2074,6 +3075,62 @@ class _TransportCard extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _TransportProgress extends StatelessWidget {
+  const _TransportProgress({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = switch (status) {
+      'accepted' => 1,
+      'pickupArrived' || 'inProgress' => 2,
+      'completed' => 3,
+      _ => 0,
+    };
+    const labels = ['Requested', 'Assigned', 'On trip', 'Complete'];
+    final activeColor = Theme.of(context).colorScheme.secondary;
+
+    return Row(
+      children: List.generate(labels.length * 2 - 1, (index) {
+        if (index.isOdd) {
+          final completed = index ~/ 2 < current;
+          return Expanded(
+            child: Container(
+              height: 3,
+              color: completed ? activeColor : Colors.black12,
+            ),
+          );
+        }
+        final step = index ~/ 2;
+        final active = step <= current;
+        return Column(
+          children: [
+            CircleAvatar(
+              radius: 13,
+              backgroundColor: active ? activeColor : Colors.black12,
+              child: Icon(
+                step < current ? Icons.check : Icons.circle,
+                size: step < current ? 16 : 8,
+                color: active ? Colors.white : Colors.black38,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              labels[step],
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+                color: active ? null : Colors.black45,
+              ),
+            ),
+          ],
+        );
+      }),
     );
   }
 }
