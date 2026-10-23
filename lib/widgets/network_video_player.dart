@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:riendzo/services/app_image_cache.dart';
 import 'package:video_player/video_player.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
@@ -157,7 +157,9 @@ class _NetworkVideoPlayerState extends State<NetworkVideoPlayer>
   Future<void> _initializeNetworkVideo(int generation) async {
     try {
       if (!kIsWeb) {
-        final cached = await DefaultCacheManager().getFileFromCache(widget.url);
+        final cached = await AppVideoCache.instance.getFileFromCache(
+          widget.url,
+        );
         if (cached != null && await cached.file.exists()) {
           await _setController(
             VideoPlayerController.file(cached.file, viewType: _videoViewType),
@@ -318,12 +320,12 @@ class _NetworkVideoPlayerState extends State<NetworkVideoPlayer>
   }
 
   Future<File> _downloadToCache() async {
-    return DefaultCacheManager().getSingleFile(widget.url);
+    return AppVideoCache.instance.getSingleFile(widget.url);
   }
 
   Future<void> _warmVideoCache() async {
     try {
-      await DefaultCacheManager().downloadFile(widget.url, key: widget.url);
+      await AppVideoCache.instance.downloadFile(widget.url, key: widget.url);
     } catch (_) {
       // Streaming playback continues even if background caching fails.
     }

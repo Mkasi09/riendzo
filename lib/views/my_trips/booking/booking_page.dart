@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -15,6 +16,7 @@ import 'package:riendzo/services/transport_fare_calculator.dart';
 import 'package:riendzo/services/google_api_config.dart';
 import 'package:riendzo/services/transport_route_estimator.dart';
 import 'package:riendzo/services/user_notification_service.dart';
+import 'package:riendzo/services/payfast_payment_service.dart';
 import 'package:riendzo/widgets/riendzo_sliver_app_bar.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_typeahead/flutter_typeahead.dart';
@@ -41,6 +43,9 @@ class _BookingPageState extends State<BookingPage> {
       TextEditingController();
   final TextEditingController _transportPickupTimeController =
       TextEditingController();
+  final TextEditingController _returnDateController = TextEditingController();
+  final TextEditingController _returnTimeController = TextEditingController();
+  final TextEditingController _returnPickupController = TextEditingController();
   final TextEditingController _transportDropoffController =
       TextEditingController();
   final TextEditingController _transportPassengersController =
@@ -49,6 +54,8 @@ class _BookingPageState extends State<BookingPage> {
       TextEditingController();
   DateTimeRange? _selectedDateRange;
   TimeOfDay? _transportPickupTime;
+  TimeOfDay? _returnPickupTime;
+  DateTime? _returnDate;
   final DateFormat dateFormat = DateFormat('dd MMM');
 
   final List<File> _selectedImages = [];
@@ -56,9 +63,14 @@ class _BookingPageState extends State<BookingPage> {
   List<Map<String, String>> _invitedFriends = [];
   bool _requestTransport = false;
   String _transportType = 'Standard';
+  bool _returnTransport = false;
+  PayfastPaymentMethod _paymentMethod = PayfastPaymentMethod.card;
   TransportRouteEstimate? _transportRouteEstimate;
+  TransportRouteEstimate? _returnRouteEstimate;
   bool _isCalculatingRoute = false;
+  bool _isCalculatingReturnRoute = false;
   String? _routeError;
+  String? _returnRouteError;
   Timer? _routeDebounce;
 
   bool isSoloSelected = true; // Boolean to track selected option
@@ -68,6 +80,7 @@ class _BookingPageState extends State<BookingPage> {
     super.initState();
     _transportPickupController.addListener(_scheduleRouteEstimate);
     _transportDropoffController.addListener(_scheduleRouteEstimate);
+    _returnPickupController.addListener(_scheduleRouteEstimate);
   }
 
   void _scheduleRouteEstimate() {
@@ -120,6 +133,88 @@ class _BookingPageState extends State<BookingPage> {
       if (mounted) {
         setState(() => _isCalculatingRoute = false);
       }
+    }
+    await _estimateReturnRoute();
+  }
+
+  Future<void> _estimateReturnRoute() async {
+    if (!_requestTransport || !_returnTransport) {
+      if (mounted) {
+        setState(() {
+          _returnRouteEstimate = null;
+          _returnRouteError = null;
+          _isCalculatingReturnRoute = false;
+        });
+      }
+      return;
+    }
+    final pickup = _returnPickupController.text.trim();
+    final dropoff = _transportPickupController.text.trim();
+    if (pickup.isEmpty || dropoff.isEmpty) {
+      setState(() {
+        _returnRouteEstimate = null;
+        _returnRouteError = null;
+      });
+      return;
+    }
+    setState(() {
+      _isCalculatingReturnRoute = true;
+      _returnRouteError = null;
+    });
+    try {
+      final estimate = await TransportRouteEstimator.estimate(
+        pickup: pickup,
+        dropoff: dropoff,
+        transportType: _transportType,
+      );
+      if (!mounted) return;
+      setState(() {
+        _returnRouteEstimate = estimate;
+        _returnRouteError = null;
+      });
+    } on TransportRouteException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _returnRouteEstimate = null;
+        _returnRouteError = error.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _returnRouteEstimate = null;
+        _returnRouteError = 'Could not calculate return route.';
+      });
+    } finally {
+      if (mounted) setState(() => _isCalculatingReturnRoute = false);
+    }
+  }
+
+  Future<void> _selectReturnDate() async {
+    final firstDate = _selectedDateRange?.start ?? DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      firstDate: firstDate,
+      lastDate: DateTime(firstDate.year + 5),
+      initialDate: _returnDate ?? _selectedDateRange?.end ?? firstDate,
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _returnDate = picked;
+        _returnDateController.text = DateFormat('dd/MM/yyyy').format(picked);
+      });
+    }
+  }
+
+  Future<void> _selectReturnTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _returnPickupTime ?? TimeOfDay.now(),
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _returnPickupTime = picked;
+        _returnTimeController.text = picked.format(context);
+      });
     }
   }
 
@@ -180,7 +275,7 @@ class _BookingPageState extends State<BookingPage> {
     final maxGroupSize = isSoloSelected
         ? 1
         : int.tryParse(_maxGroupSizeController.text);
-    if (maxGroupSize == null || maxGroupSize < 2) {
+    if (!isSoloSelected && (maxGroupSize == null || maxGroupSize < 2)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Group trips must allow at least 2 people.'),
@@ -194,13 +289,14 @@ class _BookingPageState extends State<BookingPage> {
     final DateTime endDate = _selectedDateRange!.end;
     final DateFormat dateFormat = DateFormat("dd/MM/yyyy");
 
-    // Validate that endDate is after startDate and not today or earlier
-    final DateTime now = DateTime.now();
-    if (endDate.isBefore(startDate) || endDate.isAtSameMomentAs(now)) {
+    // A same-day date range is a valid one-day trip. Reject dates before today.
+    final today = DateUtils.dateOnly(DateTime.now());
+    if (DateUtils.dateOnly(startDate).isBefore(today) ||
+        DateUtils.dateOnly(endDate).isBefore(DateUtils.dateOnly(startDate))) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'End date must be after the start date and cannot be today',
+            'Trip dates must be today or later, and the end date cannot be before the start date.',
           ),
         ),
       );
@@ -231,6 +327,18 @@ class _BookingPageState extends State<BookingPage> {
         );
         return;
       }
+      if (_returnTransport &&
+          (_returnDate == null || _returnPickupTime == null)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Add a return pickup location, date, and time.'),
+          ),
+        );
+        return;
+      }
+      if (_returnTransport && _returnPickupController.text.trim().isEmpty) {
+        _returnPickupController.text = _transportDropoffController.text.trim();
+      }
 
       final passengers = int.tryParse(_transportPassengersController.text);
       if (passengers == null || passengers < 1) {
@@ -243,12 +351,26 @@ class _BookingPageState extends State<BookingPage> {
       if (_transportRouteEstimate == null) {
         await _estimateRoute();
       }
+      if (_returnTransport && _returnRouteEstimate == null) {
+        await _estimateReturnRoute();
+      }
 
       if (_transportRouteEstimate == null) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Transport fare could not be calculated'),
+          ),
+        );
+        return;
+      }
+      if (_returnTransport && _returnRouteEstimate == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _returnRouteError ?? 'Return fare could not be calculated.',
+            ),
           ),
         );
         return;
@@ -275,14 +397,32 @@ class _BookingPageState extends State<BookingPage> {
 
     CollectionReference trips = FirebaseFirestore.instance.collection('trips');
     try {
+      final random = Random.secure();
+      final outboundPickupOtp = (100000 + random.nextInt(900000)).toString();
+      final returnPickupOtp = _returnTransport
+          ? (100000 + random.nextInt(900000)).toString()
+          : null;
       final distanceKm = _requestTransport
           ? _transportRouteEstimate!.distanceKm
           : null;
       final durationMinutes = _requestTransport
           ? _transportRouteEstimate!.durationMinutes
           : null;
+      final returnDistanceKm = _requestTransport && _returnTransport
+          ? _returnRouteEstimate!.distanceKm
+          : null;
+      final returnDurationMinutes = _requestTransport && _returnTransport
+          ? _returnRouteEstimate!.durationMinutes
+          : null;
+      final returnEstimatedFare = _requestTransport && _returnTransport
+          ? _returnRouteEstimate!.estimatedFare
+          : null;
       final estimatedFare = _requestTransport
           ? _transportRouteEstimate!.estimatedFare
+          : null;
+      final totalEstimatedFare = _requestTransport
+          ? _transportRouteEstimate!.estimatedFare +
+                (_returnTransport ? _returnRouteEstimate!.estimatedFare : 0)
           : null;
       final pickupAt = _requestTransport
           ? DateTime(
@@ -291,6 +431,15 @@ class _BookingPageState extends State<BookingPage> {
               startDate.day,
               _transportPickupTime!.hour,
               _transportPickupTime!.minute,
+            )
+          : null;
+      final returnAt = _requestTransport && _returnTransport
+          ? DateTime(
+              _returnDate!.year,
+              _returnDate!.month,
+              _returnDate!.day,
+              _returnPickupTime!.hour,
+              _returnPickupTime!.minute,
             )
           : null;
       final invitedUsers = _pendingInviteUsers();
@@ -321,7 +470,28 @@ class _BookingPageState extends State<BookingPage> {
         if (_requestTransport)
           'transport': {
             'status': 'requested',
+            'paymentProvider': 'payfast',
+            'paymentStatus': 'awaiting_payment',
+            'paymentMethodPreference': _paymentMethod.value,
             'type': _transportType,
+            'returnTrip': _returnTransport,
+            'returnDate': _returnDateController.text.trim(),
+            'returnPickupTime': _returnTimeController.text.trim(),
+            'returnAt': returnAt == null ? null : Timestamp.fromDate(returnAt),
+            if (_returnTransport) ...{
+              'plannedReturnPickup': _returnPickupController.text.trim(),
+              'returnPickupCoordinates': {
+                'latitude': _returnRouteEstimate!.pickupLatitude,
+                'longitude': _returnRouteEstimate!.pickupLongitude,
+              },
+              'returnDropoffCoordinates': {
+                'latitude': _returnRouteEstimate!.dropoffLatitude,
+                'longitude': _returnRouteEstimate!.dropoffLongitude,
+              },
+              'returnDistanceKm': returnDistanceKm,
+              'returnDurationMinutes': returnDurationMinutes,
+              'returnEstimatedFare': returnEstimatedFare,
+            },
             'pickup': _transportPickupController.text.trim(),
             'pickupCoordinates': {
               'latitude': _transportRouteEstimate!.pickupLatitude,
@@ -329,6 +499,8 @@ class _BookingPageState extends State<BookingPage> {
             },
             'pickupTime': _transportPickupTimeController.text.trim(),
             'pickupAt': pickupAt == null ? null : Timestamp.fromDate(pickupAt),
+            'outboundPickupOtp': outboundPickupOtp,
+            'returnPickupOtp': returnPickupOtp,
             'dropoff': _transportDropoffController.text.trim(),
             'dropoffCoordinates': {
               'latitude': _transportRouteEstimate!.dropoffLatitude,
@@ -338,6 +510,7 @@ class _BookingPageState extends State<BookingPage> {
             'distanceKm': distanceKm,
             'durationMinutes': durationMinutes,
             'estimatedFare': estimatedFare,
+            'totalEstimatedFare': totalEstimatedFare,
             'currency': 'ZAR',
           },
       });
@@ -349,40 +522,97 @@ class _BookingPageState extends State<BookingPage> {
       );
 
       if (_requestTransport) {
-        await FirebaseFirestore.instance.collection('transport_requests').add({
-          'tripId': tripDoc.id,
-          'userId': user?.uid,
-          'riderName': user?.displayName ?? user?.email ?? 'Riendzo traveler',
-          'tripName': _tripNameController.text.trim(),
-          'destination': _destinationController.text.trim(),
-          'tripStartDate': dateFormat.format(startDate),
-          'tripEndDate': dateFormat.format(endDate),
-          'tripStartAt': Timestamp.fromDate(startDate),
-          'tripEndAt': Timestamp.fromDate(endDate),
-          'pickupTime': _transportPickupTimeController.text.trim(),
-          'pickupAt': pickupAt == null ? null : Timestamp.fromDate(pickupAt),
-          'pickup': _transportPickupController.text.trim(),
-          'pickupCoordinates': {
-            'latitude': _transportRouteEstimate!.pickupLatitude,
-            'longitude': _transportRouteEstimate!.pickupLongitude,
-          },
-          'dropoff': _transportDropoffController.text.trim(),
-          'dropoffCoordinates': {
-            'latitude': _transportRouteEstimate!.dropoffLatitude,
-            'longitude': _transportRouteEstimate!.dropoffLongitude,
-          },
-          'passengers': int.parse(_transportPassengersController.text),
-          'distanceKm': distanceKm,
-          'durationMinutes': durationMinutes,
-          'estimatedFare': estimatedFare,
-          'currency': 'ZAR',
-          'transportType': _transportType,
-          'note': _transportNoteController.text.trim(),
-          'status': 'pending',
-          'createdAt': FieldValue.serverTimestamp(),
-          'acceptedBy': null,
-          'acceptedAt': null,
-        });
+        final transportRequest = await FirebaseFirestore.instance
+            .collection('transport_requests')
+            .add({
+              'tripId': tripDoc.id,
+              'userId': user?.uid,
+              'riderName':
+                  user?.displayName ?? user?.email ?? 'Riendzo traveler',
+              'tripName': _tripNameController.text.trim(),
+              'destination': _destinationController.text.trim(),
+              'tripStartDate': dateFormat.format(startDate),
+              'tripEndDate': dateFormat.format(endDate),
+              'tripStartAt': Timestamp.fromDate(startDate),
+              'tripEndAt': Timestamp.fromDate(endDate),
+              'pickupTime': _transportPickupTimeController.text.trim(),
+              'pickupAt': pickupAt == null
+                  ? null
+                  : Timestamp.fromDate(pickupAt),
+              'outboundPickupOtp': outboundPickupOtp,
+              'returnPickupOtp': returnPickupOtp,
+              'pickup': _transportPickupController.text.trim(),
+              'pickupCoordinates': {
+                'latitude': _transportRouteEstimate!.pickupLatitude,
+                'longitude': _transportRouteEstimate!.pickupLongitude,
+              },
+              'dropoff': _transportDropoffController.text.trim(),
+              'dropoffCoordinates': {
+                'latitude': _transportRouteEstimate!.dropoffLatitude,
+                'longitude': _transportRouteEstimate!.dropoffLongitude,
+              },
+              'passengers': int.parse(_transportPassengersController.text),
+              'distanceKm': distanceKm,
+              'durationMinutes': durationMinutes,
+              'estimatedFare': estimatedFare,
+              'totalEstimatedFare': totalEstimatedFare,
+              'returnTrip': _returnTransport,
+              'returnDate': _returnDateController.text.trim(),
+              'returnPickupTime': _returnTimeController.text.trim(),
+              'returnAt': returnAt == null
+                  ? null
+                  : Timestamp.fromDate(returnAt),
+              if (_returnTransport) ...{
+                'plannedReturnPickup': _returnPickupController.text.trim(),
+                'returnPickupCoordinates': {
+                  'latitude': _returnRouteEstimate!.pickupLatitude,
+                  'longitude': _returnRouteEstimate!.pickupLongitude,
+                },
+                'returnDropoffCoordinates': {
+                  'latitude': _returnRouteEstimate!.dropoffLatitude,
+                  'longitude': _returnRouteEstimate!.dropoffLongitude,
+                },
+                'returnDistanceKm': returnDistanceKm,
+                'returnDurationMinutes': returnDurationMinutes,
+                'returnEstimatedFare': returnEstimatedFare,
+              },
+              'currency': 'ZAR',
+              'transportType': _transportType,
+              'note': _transportNoteController.text.trim(),
+              'status': 'awaiting_payment',
+              'paymentProvider': 'payfast',
+              'paymentStatus': 'awaiting_payment',
+              'paymentMethodPreference': _paymentMethod.value,
+              'createdAt': FieldValue.serverTimestamp(),
+              'acceptedBy': null,
+              'acceptedAt': null,
+            });
+        try {
+          await tripDoc.update({
+            'transport.transportRequestId': transportRequest.id,
+          });
+          await PayfastPaymentService().startTransportPayment(
+            transportRequestId: transportRequest.id,
+            preferredMethod: _paymentMethod,
+          );
+        } catch (error) {
+          try {
+            await PayfastPaymentService().deferTransportPayment(
+              transportRequestId: transportRequest.id,
+            );
+          } catch (_) {
+            // The trip exists even if the temporary payment fallback cannot be saved.
+          }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Transport request sent. Secure checkout is temporarily unavailable, so payment is due when the trip is completed.',
+                ),
+              ),
+            );
+          }
+        }
       }
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -522,6 +752,9 @@ class _BookingPageState extends State<BookingPage> {
     _routeDebounce?.cancel();
     _transportPickupController.dispose();
     _transportPickupTimeController.dispose();
+    _returnDateController.dispose();
+    _returnTimeController.dispose();
+    _returnPickupController.dispose();
     _transportDropoffController.dispose();
     _transportPassengersController.dispose();
     _transportNoteController.dispose();
@@ -759,14 +992,21 @@ class _BookingPageState extends State<BookingPage> {
     TransportRequestSection(
       enabled: _requestTransport,
       transportType: _transportType,
+      returnTrip: _returnTransport,
       pickupController: _transportPickupController,
       pickupTimeController: _transportPickupTimeController,
+      returnDateController: _returnDateController,
+      returnTimeController: _returnTimeController,
+      returnPickupController: _returnPickupController,
       dropoffController: _transportDropoffController,
       passengersController: _transportPassengersController,
       noteController: _transportNoteController,
       routeEstimate: _transportRouteEstimate,
       isCalculatingRoute: _isCalculatingRoute,
       routeError: _routeError,
+      returnRouteEstimate: _returnRouteEstimate,
+      isCalculatingReturnRoute: _isCalculatingReturnRoute,
+      returnRouteError: _returnRouteError,
       onEnabledChanged: (value) {
         setState(() {
           _requestTransport = value;
@@ -776,6 +1016,8 @@ class _BookingPageState extends State<BookingPage> {
           if (!value) {
             _transportRouteEstimate = null;
             _routeError = null;
+            _returnRouteEstimate = null;
+            _returnRouteError = null;
           }
         });
         if (value) _scheduleRouteEstimate();
@@ -787,10 +1029,72 @@ class _BookingPageState extends State<BookingPage> {
             transportType: value,
           );
         });
+        _scheduleRouteEstimate();
       },
+      onReturnTripChanged: (value) {
+        setState(() {
+          _returnTransport = value;
+          if (value && _returnPickupController.text.trim().isEmpty) {
+            _returnPickupController.text = _transportDropoffController.text;
+          }
+          if (!value) {
+            _returnRouteEstimate = null;
+            _returnRouteError = null;
+          }
+        });
+        if (value) _scheduleRouteEstimate();
+      },
+      onSelectReturnDate: _selectReturnDate,
+      onSelectReturnTime: _selectReturnTime,
       onRefreshRoute: _estimateRoute,
       onSelectPickupTime: _selectPickupTime,
     ),
+    if (_requestTransport) ...[
+      const SizedBox(height: 12),
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.lock_outline),
+                  SizedBox(width: 8),
+                  Text(
+                    'Pay securely with Payfast',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Pay the transport estimate after creating the trip. Your receipt will show the recorded final fare.',
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<PayfastPaymentMethod>(
+                initialValue: _paymentMethod,
+                decoration: const InputDecoration(
+                  labelText: 'Payment method',
+                  border: OutlineInputBorder(),
+                ),
+                items: PayfastPaymentMethod.values
+                    .map(
+                      (method) => DropdownMenuItem(
+                        value: method,
+                        child: Text(method.label),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (method) {
+                  if (method != null) setState(() => _paymentMethod = method);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    ],
     if (!_requestTransport)
       const Padding(
         padding: EdgeInsets.all(18),
@@ -843,10 +1147,31 @@ class _BookingPageState extends State<BookingPage> {
               ('Pickup', _transportPickupController.text),
               ('Drop-off', _transportDropoffController.text),
               ('Pickup time', _transportPickupTimeController.text),
+              if (_returnTransport) ...[
+                ('Planned return pickup', _returnPickupController.text),
+                ('Return time', _returnTimeController.text),
+              ],
               if (_transportRouteEstimate != null)
                 (
-                  'Estimated fare',
+                  _returnTransport ? 'Outbound estimate' : 'Transport estimate',
                   'R${_transportRouteEstimate!.estimatedFare.toStringAsFixed(0)}',
+                ),
+              if (_returnTransport && _returnRouteEstimate != null)
+                (
+                  'Return estimate',
+                  'R${_returnRouteEstimate!.estimatedFare.toStringAsFixed(0)}',
+                ),
+              if (_returnTransport && _returnRouteEstimate != null)
+                (
+                  'Total transport estimate',
+                  'R${(_transportRouteEstimate!.estimatedFare + _returnRouteEstimate!.estimatedFare).toStringAsFixed(0)}',
+                ),
+              if (_requestTransport)
+                ('Pickup verification', 'A 6-digit OTP is shown after booking'),
+              if (_requestTransport)
+                (
+                  'Changes and cancellation',
+                  'Edit return details before pickup; cancel before a driver accepts',
                 ),
             ]
           : const [('Request', 'No transport needed')],
@@ -856,7 +1181,7 @@ class _BookingPageState extends State<BookingPage> {
   Future<void> _pickDates() async {
     final picked = await showDateRangePicker(
       context: context,
-      firstDate: DateTime.now(),
+      firstDate: DateUtils.dateOnly(DateTime.now()),
       lastDate: DateTime(2030),
       initialDateRange:
           _selectedDateRange ??
@@ -911,8 +1236,24 @@ class _BookingPageState extends State<BookingPage> {
         _showStepMessage('Add pickup, drop-off, and pickup time.');
         return;
       }
+      if (_returnTransport &&
+          (_returnDate == null ||
+              _returnPickupTime == null ||
+              _returnPickupController.text.trim().isEmpty)) {
+        _showStepMessage('Add a return pickup location, date, and time.');
+        return;
+      }
       if (_transportRouteEstimate == null) await _estimateRoute();
       if (_transportRouteEstimate == null) return;
+      if (_returnTransport && _returnRouteEstimate == null) {
+        await _estimateReturnRoute();
+      }
+      if (_returnTransport && _returnRouteEstimate == null) {
+        _showStepMessage(
+          _returnRouteError ?? 'Return fare could not be calculated.',
+        );
+        return;
+      }
     }
     if (mounted) setState(() => _currentStep++);
   }

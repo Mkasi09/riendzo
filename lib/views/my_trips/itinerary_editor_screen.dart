@@ -1,5 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:riendzo/services/user_notification_service.dart';
 
 class ItineraryEditorScreen extends StatefulWidget {
   final String tripId;
@@ -175,12 +178,61 @@ class _ItineraryEditorScreenState extends State<ItineraryEditorScreen> {
   }
 
   Future<void> _save() async {
+    final tripRef = FirebaseFirestore.instance
+        .collection('trips')
+        .doc(widget.tripId);
+    final tripSnapshot = await tripRef.get();
+    final trip = tripSnapshot.data();
+    if (trip == null) {
+      _showError('This trip is no longer available.');
+      return;
+    }
+    final status = trip['status']?.toString().toLowerCase() ?? '';
+    if (status == 'cancelled' || status == 'completed') {
+      _showError('Completed and cancelled trip itineraries cannot be edited.');
+      return;
+    }
+    final days = _stops.map(_dayNumber).toList();
+    if (days.any((day) => day == null)) {
+      _showError(
+        'Give every activity a day number, for example Day 1 · 09:00.',
+      );
+      return;
+    }
+    final dayNumbers = days.cast<int>();
+    if (dayNumbers.toSet().length != dayNumbers.length) {
+      _showError('Use one itinerary entry per day. Day numbers cannot repeat.');
+      return;
+    }
+    final tripDays = _tripDurationDays(trip);
+    if (tripDays != null &&
+        dayNumbers.any((day) => day < 1 || day > tripDays)) {
+      _showError('Itinerary days must be between Day 1 and Day $tripDays.');
+      return;
+    }
     setState(() => _saving = true);
     try {
-      await FirebaseFirestore.instance
-          .collection('trips')
-          .doc(widget.tripId)
-          .update({'itinerary': _stops});
+      await tripRef.update({
+        'itinerary': _stops,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      final currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
+      for (final member
+          in (trip['joinedUsers'] as List? ?? []).whereType<Map>()) {
+        final memberId = member['userId']?.toString() ?? '';
+        if (memberId.isNotEmpty && memberId != currentUserId) {
+          await UserNotificationService.create(
+            userId: memberId,
+            type: 'trip_updated',
+            title: 'Itinerary updated',
+            message:
+                'The itinerary for ${trip['tripName'] ?? 'your trip'} was updated.',
+            tripId: widget.tripId,
+            tripName: trip['tripName']?.toString(),
+            actorUserId: currentUserId,
+          );
+        }
+      }
       if (mounted) Navigator.pop(context);
     } catch (_) {
       if (!mounted) return;
@@ -189,6 +241,34 @@ class _ItineraryEditorScreenState extends State<ItineraryEditorScreen> {
         const SnackBar(content: Text('Could not save the itinerary.')),
       );
     }
+  }
+
+  int? _dayNumber(Map<String, dynamic> stop) {
+    final match = RegExp(
+      r'\bday\s*(\d+)\b',
+      caseSensitive: false,
+    ).firstMatch(stop['time']?.toString() ?? '');
+    return match == null ? null : int.tryParse(match.group(1)!);
+  }
+
+  int? _tripDurationDays(Map<String, dynamic> trip) {
+    try {
+      final start = DateFormat(
+        'dd/MM/yyyy',
+      ).parseStrict(trip['startDate'].toString());
+      final end = DateFormat(
+        'dd/MM/yyyy',
+      ).parseStrict(trip['endDate'].toString());
+      return end.difference(start).inDays + 1;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 }
 

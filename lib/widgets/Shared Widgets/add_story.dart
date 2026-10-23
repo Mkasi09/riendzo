@@ -2,64 +2,82 @@ import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart'; // Import for image picking
 
 class AddStoryPopup extends StatefulWidget {
-  File imageFile;
+  final File imageFile;
 
-  AddStoryPopup({super.key, required this.imageFile});
+  const AddStoryPopup({super.key, required this.imageFile});
 
   @override
-  _AddStoryPopupState createState() => _AddStoryPopupState();
+  State<AddStoryPopup> createState() => _AddStoryPopupState();
 }
 
 class _AddStoryPopupState extends State<AddStoryPopup> {
   final TextEditingController _captionController = TextEditingController();
-  final DatabaseReference _dbRef = FirebaseDatabase.instance.ref().child(
-    'stories',
-  );
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  late File _imageFile;
   bool _isUploading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _imageFile = widget.imageFile;
+  }
+
+  @override
+  void dispose() {
+    _captionController.dispose();
+    super.dispose();
+  }
 
   // Function to post the story
   Future<void> _postStory() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      _showMessage('Sign in to post a story.');
+      return;
+    }
+    if (_isUploading) return;
     setState(() {
       _isUploading = true;
     });
 
     try {
-      // Upload the image to Firebase Storage and get the download URL
-      String imageUrl = await _addPictureStory(widget.imageFile);
+      final imageUrl = await _addPictureStory(_imageFile);
 
-      // Save the story to Firestore
       await FirebaseFirestore.instance.collection('stories').add({
         'type': 'image',
-        'content': imageUrl, // Save the image URL
-        'caption': _captionController.text, // Save the caption
-        'userId': _auth.currentUser?.uid ?? '', // Save the user ID
-        'timestamp':
-            DateTime.now().millisecondsSinceEpoch, // Save the timestamp
+        'content': imageUrl,
+        'caption': _captionController.text.trim(),
+        'userId': user.uid,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
 
-      // Close the popup after posting
-      Navigator.of(context).pop();
-    } catch (e) {
-      print('Error posting story: $e');
+      if (mounted) Navigator.of(context).pop();
+    } catch (_) {
+      _showMessage(
+        'Your story could not be posted. Check your connection and try again.',
+      );
     } finally {
-      setState(() {
-        _isUploading = false;
-      });
+      if (mounted) setState(() => _isUploading = false);
     }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   // Upload image to Firebase Storage and return the download URL
   Future<String> _addPictureStory(File image) async {
     FirebaseStorage storage = FirebaseStorage.instance;
     Reference ref = storage.ref().child(
-      "stories/${DateTime.now().millisecondsSinceEpoch}.jpg",
+      'stories/${_auth.currentUser!.uid}/${DateTime.now().microsecondsSinceEpoch}.jpg',
     );
     SettableMetadata metadata = SettableMetadata(
       cacheControl: 'max-age=60',
@@ -78,118 +96,124 @@ class _AddStoryPopupState extends State<AddStoryPopup> {
       source: ImageSource.gallery,
     );
 
-    if (pickedFile != null) {
-      setState(() {
-        widget.imageFile = File(pickedFile.path);
-      });
+    if (pickedFile != null && mounted) {
+      setState(() => _imageFile = File(pickedFile.path));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black.withOpacity(0.8),
-      resizeToAvoidBottomInset:
-          true, // Ensures UI adjusts when keyboard appears
+      backgroundColor: const Color(0xFF101114),
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
-        child: Stack(
+        child: Column(
           children: [
-            // Top row: Cancel and Edit buttons
-            Positioned(
-              top: 30,
-              left: 10,
-              right: 10,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Cancel button (closes the popup)
                   IconButton(
-                    icon: const Icon(Icons.cancel, color: Colors.white),
-                    iconSize: 30,
-                    onPressed: () {
-                      Navigator.of(context).pop(); // Close the popup
-                    },
+                    tooltip: 'Cancel',
+                    onPressed: _isUploading
+                        ? null
+                        : () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close, color: Colors.white),
                   ),
-                  // Edit button (allows to change the photo)
-                  IconButton(
-                    icon: const Icon(Icons.edit, color: Colors.white),
-                    iconSize: 30,
-                    onPressed: _changePhoto, // Change the image
+                  const Expanded(
+                    child: Text(
+                      'New story',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: _isUploading ? null : _changePhoto,
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('Change'),
+                    style: TextButton.styleFrom(foregroundColor: Colors.white),
                   ),
                 ],
               ),
             ),
-
-            // Center the image and shift it 2 inches down
-            Center(
-              child: Positioned.fill(
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 child: Center(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment
-                          .center, // Center the content vertically
-                      children: [
-                        Center(
-                          child: Image.file(
-                            widget.imageFile,
-                            fit: BoxFit
-                                .contain, // Maintain aspect ratio without cropping
-                          ),
-                        ),
-                      ],
+                  child: Image.file(
+                    _imageFile,
+                    fit: BoxFit.contain,
+                    width: double.infinity,
+                    errorBuilder: (context, error, stackTrace) => const Icon(
+                      Icons.broken_image_outlined,
+                      color: Colors.white70,
+                      size: 64,
                     ),
                   ),
                 ),
               ),
             ),
-
-            // Caption input overlaid at the bottom
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: Padding(
-                padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(
-                    context,
-                  ).viewPadding.bottom, // Adjust padding when keyboard is open
-                ),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(
-                      0.8,
-                    ), // Semi-transparent black background
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  child: TextField(
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              decoration: const BoxDecoration(
+                color: Color(0xFF1C1D21),
+                border: Border(top: BorderSide(color: Colors.white12)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
                     controller: _captionController,
-                    style: const TextStyle(color: Colors.white), // White text
+                    enabled: !_isUploading,
+                    style: const TextStyle(color: Colors.white),
+                    textCapitalization: TextCapitalization.sentences,
+                    minLines: 1,
+                    maxLines: 3,
+                    maxLength: 180,
                     decoration: InputDecoration(
-                      hintText: 'Add a caption...',
-                      hintStyle: const TextStyle(color: Colors.white54),
-                      border: InputBorder.none,
-                      suffixIcon: _isUploading
-                          ? const Padding(
-                              padding: EdgeInsets.all(12.0),
-                              child: CircularProgressIndicator(
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Colors.white,
-                                ),
-                              ),
-                            )
-                          : IconButton(
-                              icon: const Icon(Icons.send, color: Colors.white),
-                              onPressed:
-                                  _postStory, // Post the story when icon is pressed
-                            ),
+                      labelText: 'Caption',
+                      hintText: 'Add something about your story',
+                      labelStyle: const TextStyle(color: Colors.white70),
+                      hintStyle: const TextStyle(color: Colors.white38),
+                      counterStyle: const TextStyle(color: Colors.white54),
+                      prefixIcon: const Icon(
+                        Icons.short_text,
+                        color: Colors.white70,
+                      ),
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.06),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
-                    maxLines: null, // Allow multiline captions
                   ),
-                ),
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    onPressed: _isUploading ? null : _postStory,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    icon: _isUploading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.send_rounded),
+                    label: Text(_isUploading ? 'Posting story…' : 'Post story'),
+                  ),
+                ],
               ),
             ),
           ],

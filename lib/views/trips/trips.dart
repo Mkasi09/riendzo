@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:riendzo/widgets/riendzo_sliver_app_bar.dart';
 import 'package:intl/intl.dart';
 import 'package:riendzo/services/currency_formatter.dart';
+import 'package:riendzo/services/app_image_cache.dart';
 import 'package:riendzo/views/my_trips/booking/booking_page.dart';
 import 'package:riendzo/views/my_trips/my_trips.dart';
 import 'package:riendzo/views/trips/widgets/trip_searchbar.dart';
@@ -1007,6 +1008,7 @@ class _TripImage extends StatelessWidget {
   Widget build(BuildContext context) {
     return CachedNetworkImage(
       imageUrl: url,
+      cacheManager: AppImageCache.instance,
       fit: BoxFit.cover,
       width: double.infinity,
       height: double.infinity,

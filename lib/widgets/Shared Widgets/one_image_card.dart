@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:riendzo/services/app_image_cache.dart';
 
 class OneImageCard extends StatelessWidget {
   final String location;
@@ -27,11 +29,11 @@ class OneImageCard extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             if (hasImage)
-              Image.network(
-                imageLink,
+              CachedNetworkImage(
+                imageUrl: imageLink,
+                cacheManager: AppImageCache.instance,
                 fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) =>
-                    const _ImageFallback(),
+                errorWidget: (context, url, error) => const _ImageFallback(),
               )
             else
               const _ImageFallback(),

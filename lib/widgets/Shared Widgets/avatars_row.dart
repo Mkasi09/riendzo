@@ -1,14 +1,11 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart'; // For Firebase Storage
 import 'package:firebase_database/firebase_database.dart'; // For Realtime Database
 import 'package:firebase_auth/firebase_auth.dart'; // For Firebase Authentication
 import 'package:riendzo/widgets/Shared%20Widgets/story_viewer.dart';
-import 'add_story.dart';
 import 'user_avatar.dart'; // Your custom UserAvatar widget
+import 'story_add_button.dart';
 
 class Stories extends StatefulWidget {
   final int radius;
@@ -36,8 +33,6 @@ class _StoriesState extends State<Stories> {
   final DatabaseReference _usersRef = FirebaseDatabase.instance.ref().child(
     'users',
   );
-  final FirebaseStorage _storage = FirebaseStorage.instance;
-  File? _selectedImage;
 
   @override
   void initState() {
@@ -79,9 +74,9 @@ class _StoriesState extends State<Stories> {
         final String key = doc.id;
 
         if (data != null) {
-          final int storyTimestamp = data['timestamp'] ?? 0;
+          final storyTimestamp = _storyTimestamp(data['timestamp']);
 
-          if (currentTime - storyTimestamp > 86400000) {
+          if (storyTimestamp > 0 && currentTime - storyTimestamp > 86400000) {
             // If the story is older than 24 hours, delete it from Firestore
             FirebaseFirestore.instance.collection('stories').doc(key).delete();
           } else {
@@ -118,6 +113,12 @@ class _StoriesState extends State<Stories> {
     });
   }
 
+  int _storyTimestamp(dynamic value) {
+    if (value is Timestamp) return value.millisecondsSinceEpoch;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
   void _updateStoryData(String key, Map<dynamic, dynamic> value, User? user) {
     setState(() {
       final index = stories.indexWhere((story) => story['key'] == key);
@@ -146,59 +147,62 @@ class _StoriesState extends State<Stories> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: MediaQuery.of(context).size.height * 0.085,
-      child: ListView.builder(
+      height: 104,
+      child: ListView.separated(
         itemCount: stories.length + 1, // Add +1 for the "Add Story" button
         shrinkWrap: true,
         scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        separatorBuilder: (context, index) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
           if (index == 0) {
             return Padding(
-              padding: EdgeInsets.symmetric(horizontal: widget.margin),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () {
-                      _pickImage();
-                    },
-                    child: CircleAvatar(
-                      radius: widget.radius * 0.9,
-                      backgroundColor: Colors.grey[300],
-                      child: const Icon(
-                        Icons.add,
-                        size: 30,
-                        color: Colors.black,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10), // Space between button and icons
-                ],
-              ),
+              padding: const EdgeInsets.only(top: 4),
+              child: StoryAddButton(size: widget.radius * 2.0),
             );
           }
 
           final story = stories[index - 1]; // Adjust index for story content
           return GestureDetector(
             onTap: () => _openStoryViewer(context, story),
-            child: Container(
-              margin: EdgeInsets.symmetric(horizontal: widget.margin),
-              decoration: BoxDecoration(
-                color: widget.statusUpdate,
-                shape: BoxShape.circle,
-              ),
-              padding: const EdgeInsets.all(3),
-              child: story['type'] == 'text'
-                  ? CircleAvatar(
-                      radius: widget.radius * 1.0,
-                      child: Text(
-                        story['content'] ?? '',
-                        style: const TextStyle(fontSize: 10),
-                      ),
-                    )
-                  : UserAvatar(
-                      size: widget.radius * 1.0,
-                      picture: story['content'] ?? '', // Load the image URL
+            child: SizedBox(
+              width: widget.radius * 2.0 + 16,
+              child: Column(
+                children: [
+                  Container(
+                    margin: const EdgeInsets.only(top: 4),
+                    decoration: BoxDecoration(
+                      color: widget.statusUpdate,
+                      shape: BoxShape.circle,
                     ),
+                    padding: const EdgeInsets.all(3),
+                    child: story['type'] == 'text'
+                        ? CircleAvatar(
+                            radius: widget.radius.toDouble(),
+                            child: Text(
+                              story['content'] ?? '',
+                              style: const TextStyle(fontSize: 10),
+                            ),
+                          )
+                        : UserAvatar(
+                            size: widget.radius.toDouble(),
+                            picture: story['content'] ?? '',
+                          ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    story['userName'] == 'My Story'
+                        ? 'My Story'
+                        : (story['userName'] ?? 'Story'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -213,8 +217,7 @@ class _StoriesState extends State<Stories> {
   ) async {
     final userId = value['userId'];
     String userName = 'Unknown'; // Default username if not found
-    String timestamp =
-        value['timestamp']?.toString() ?? ''; // Get the timestamp
+    final String timestamp = _storyTimestamp(value['timestamp']).toString();
     String profilePictureUrl = ''; // Initialize profile picture URL
 
     if (userId != null) {
@@ -237,75 +240,36 @@ class _StoriesState extends State<Stories> {
     }
 
     setState(() {
-      stories.add({
+      final Map<String, String> story = {
         'key': key, // Add the key for easy reference
-        'type': value['type'],
-        'content': value['content'],
+        'userId': userId?.toString() ?? '',
+        'type': value['type']?.toString() ?? 'image',
+        'content': value['content']?.toString() ?? '',
         'userName': userName, // Set "My Story" or the fetched username
         'timestamp': timestamp, // Add the timestamp
         'profilePicture': profilePictureUrl, // Add profile picture URL
-        'caption': value['caption'] ?? '', // Add caption if available
-      });
+        'caption':
+            value['caption']?.toString() ?? '', // Add caption if available
+      };
+      final index = stories.indexWhere((item) => item['key'] == key);
+      if (index < 0) {
+        stories.add(story);
+      } else {
+        stories[index] = story;
+      }
     });
-  }
-
-  /// Handle adding a picture story with a popup preview and caption input
-  Future<void> _pickImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-
-    if (pickedFile != null) {
-      File selectedImage = File(pickedFile.path);
-
-      // Show the custom popup with the image preview and caption input
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.black.withOpacity(0.9), // Black background
-        builder: (context) => AddStoryPopup(imageFile: selectedImage),
-      );
-    }
   }
 
   // Open the story viewer for both text and image
   void _openStoryViewer(BuildContext context, Map<String, String> story) {
-    String userId = story['userId'] ?? '';
-    _usersRef.child(userId).once().then((userSnapshot) {
-      String profilePictureUrl = '';
-      if (userSnapshot.snapshot.value != null) {
-        final userData = Map<String, dynamic>.from(
-          userSnapshot.snapshot.value as Map,
-        );
-        profilePictureUrl =
-            userData['profilePicture'] ?? ''; // Get the profile picture URL
-      }
-
-      AnimationController progressController = AnimationController(
-        vsync: Navigator.of(context),
-        duration: const Duration(seconds: 5), // Adjust the duration as needed
-      );
-
-      Navigator.of(context)
-          .push(
-            MaterialPageRoute(
-              builder: (context) => StoryViewer(
-                content: story['content'] ?? '',
-                type: story['type'] ?? 'text',
-                progressController: progressController,
-                userName: story['userName'] ?? 'Unknown',
-                timestamp: story['timestamp'] ?? 'Unknown',
-                profilePictureUrl: profilePictureUrl,
-                userId: userId,
-                storyKey: story['key'] ?? '',
-                caption:
-                    story['caption'] ?? '', // Use the key from the story map
-              ),
-              fullscreenDialog: true,
-            ),
-          )
-          .then((_) {
-            progressController.dispose();
-          });
-    });
+    final index = stories.indexWhere((item) => item['key'] == story['key']);
+    if (index < 0) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            StoryViewer(stories: List.of(stories), initialIndex: index),
+        fullscreenDialog: true,
+      ),
+    );
   }
 }

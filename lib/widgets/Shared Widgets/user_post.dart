@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:riendzo/services/app_image_cache.dart';
 import 'package:ionicons/ionicons.dart';
 import 'package:riendzo/widgets/Shared%20Widgets/icon_text_row.dart';
 import 'package:riendzo/widgets/Shared%20Widgets/user_avatar.dart';
@@ -80,7 +82,10 @@ class UserPost extends StatelessWidget {
                 decoration: BoxDecoration(
                   image: DecorationImage(
                     fit: BoxFit.fill,
-                    image: NetworkImage(picture),
+                    image: CachedNetworkImageProvider(
+                      picture,
+                      cacheManager: AppImageCache.instance,
+                    ),
                   ),
                 ),
               ),

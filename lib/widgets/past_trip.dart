@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:ionicons/ionicons.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:riendzo/services/app_image_cache.dart';
 import 'package:riendzo/widgets/custom_icon.dart';
 import 'package:riendzo/widgets/liked_users_stacked_avatars.dart';
 
@@ -61,7 +63,10 @@ class PastTripCard extends StatelessWidget {
                   ),
                   image: DecorationImage(
                     fit: BoxFit.fill,
-                    image: NetworkImage(image1),
+                    image: CachedNetworkImageProvider(
+                      image1,
+                      cacheManager: AppImageCache.instance,
+                    ),
                   ),
                 ),
               ),
@@ -77,7 +82,10 @@ class PastTripCard extends StatelessWidget {
                       ),
                       image: DecorationImage(
                         fit: BoxFit.fill,
-                        image: NetworkImage(image2),
+                        image: CachedNetworkImageProvider(
+                          image2,
+                          cacheManager: AppImageCache.instance,
+                        ),
                       ),
                     ),
                   ),
@@ -90,7 +98,10 @@ class PastTripCard extends StatelessWidget {
                         decoration: BoxDecoration(
                           image: DecorationImage(
                             fit: BoxFit.fill,
-                            image: NetworkImage(image3),
+                            image: CachedNetworkImageProvider(
+                              image3,
+                              cacheManager: AppImageCache.instance,
+                            ),
                           ),
                         ),
                       ),
@@ -104,7 +115,10 @@ class PastTripCard extends StatelessWidget {
                           ),
                           image: DecorationImage(
                             fit: BoxFit.fill,
-                            image: NetworkImage(image4),
+                            image: CachedNetworkImageProvider(
+                              image4,
+                              cacheManager: AppImageCache.instance,
+                            ),
                           ),
                         ),
                       ),

@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:riendzo/services/app_image_cache.dart';
 import 'package:riendzo/widgets/network_video_player.dart';
 
 class PostMediaCarousel extends StatefulWidget {
@@ -38,6 +39,7 @@ class _PostMediaCarouselState extends State<PostMediaCarousel> {
               }
               return CachedNetworkImage(
                 imageUrl: url,
+                cacheManager: AppImageCache.instance,
                 fit: BoxFit.cover,
                 placeholder: (context, _) => ColoredBox(
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,

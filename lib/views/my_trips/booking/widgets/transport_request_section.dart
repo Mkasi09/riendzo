@@ -6,34 +6,54 @@ class TransportRequestSection extends StatelessWidget {
     super.key,
     required this.enabled,
     required this.transportType,
+    required this.returnTrip,
     required this.pickupController,
     required this.pickupTimeController,
+    required this.returnDateController,
+    required this.returnTimeController,
+    required this.returnPickupController,
     required this.dropoffController,
     required this.passengersController,
     required this.noteController,
     required this.routeEstimate,
     required this.isCalculatingRoute,
     required this.routeError,
+    required this.returnRouteEstimate,
+    required this.isCalculatingReturnRoute,
+    required this.returnRouteError,
     required this.onEnabledChanged,
     required this.onTransportTypeChanged,
+    required this.onReturnTripChanged,
     required this.onRefreshRoute,
     required this.onSelectPickupTime,
+    required this.onSelectReturnDate,
+    required this.onSelectReturnTime,
   });
 
   final bool enabled;
   final String transportType;
+  final bool returnTrip;
   final TextEditingController pickupController;
   final TextEditingController pickupTimeController;
+  final TextEditingController returnDateController;
+  final TextEditingController returnTimeController;
+  final TextEditingController returnPickupController;
   final TextEditingController dropoffController;
   final TextEditingController passengersController;
   final TextEditingController noteController;
   final TransportRouteEstimate? routeEstimate;
   final bool isCalculatingRoute;
   final String? routeError;
+  final TransportRouteEstimate? returnRouteEstimate;
+  final bool isCalculatingReturnRoute;
+  final String? returnRouteError;
   final ValueChanged<bool> onEnabledChanged;
   final ValueChanged<String> onTransportTypeChanged;
+  final ValueChanged<bool> onReturnTripChanged;
   final VoidCallback onRefreshRoute;
   final VoidCallback onSelectPickupTime;
+  final VoidCallback onSelectReturnDate;
+  final VoidCallback onSelectReturnTime;
 
   static const transportTypes = ['Standard', 'Comfort', 'XL'];
 
@@ -76,6 +96,24 @@ class TransportRequestSection extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 12),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(
+                    value: false,
+                    icon: Icon(Icons.arrow_forward_rounded),
+                    label: Text('Pickup only'),
+                  ),
+                  ButtonSegment(
+                    value: true,
+                    icon: Icon(Icons.sync_alt_rounded),
+                    label: Text('Return transport'),
+                  ),
+                ],
+                selected: {returnTrip},
+                onSelectionChanged: (selection) =>
+                    onReturnTripChanged(selection.first),
+              ),
+              const SizedBox(height: 12),
               _TransportField(
                 controller: pickupController,
                 icon: Icons.my_location_outlined,
@@ -99,6 +137,45 @@ class TransportRequestSection extends StatelessWidget {
                 icon: Icons.place_outlined,
                 label: 'Dropoff location',
               ),
+              if (returnTrip) ...[
+                const SizedBox(height: 10),
+                _TransportField(
+                  controller: returnPickupController,
+                  icon: Icons.location_on_outlined,
+                  label: 'Return pickup location',
+                ),
+                const Padding(
+                  padding: EdgeInsets.only(left: 12, top: 4),
+                  child: Text(
+                    'Suggested from your drop-off. You can change it; the driver will confirm it with you.',
+                    style: TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: onSelectReturnDate,
+                  child: AbsorbPointer(
+                    child: _TransportField(
+                      controller: returnDateController,
+                      icon: Icons.calendar_today_outlined,
+                      label: 'Return date',
+                      readOnly: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: onSelectReturnTime,
+                  child: AbsorbPointer(
+                    child: _TransportField(
+                      controller: returnTimeController,
+                      icon: Icons.access_time,
+                      label: 'Return pickup time',
+                      readOnly: true,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 10),
               _TransportField(
                 controller: passengersController,
@@ -116,9 +193,13 @@ class TransportRequestSection extends StatelessWidget {
               const SizedBox(height: 12),
               _FareEstimate(
                 transportType: transportType,
+                returnTrip: returnTrip,
                 routeEstimate: routeEstimate,
                 isCalculatingRoute: isCalculatingRoute,
                 routeError: routeError,
+                returnRouteEstimate: returnRouteEstimate,
+                isCalculatingReturnRoute: isCalculatingReturnRoute,
+                returnRouteError: returnRouteError,
                 onRefreshRoute: onRefreshRoute,
               ),
             ],
@@ -140,21 +221,32 @@ class TransportRequestSection extends StatelessWidget {
 class _FareEstimate extends StatelessWidget {
   const _FareEstimate({
     required this.transportType,
+    required this.returnTrip,
     required this.routeEstimate,
     required this.isCalculatingRoute,
     required this.routeError,
+    required this.returnRouteEstimate,
+    required this.isCalculatingReturnRoute,
+    required this.returnRouteError,
     required this.onRefreshRoute,
   });
 
   final String transportType;
+  final bool returnTrip;
   final TransportRouteEstimate? routeEstimate;
   final bool isCalculatingRoute;
   final String? routeError;
+  final TransportRouteEstimate? returnRouteEstimate;
+  final bool isCalculatingReturnRoute;
+  final String? returnRouteError;
   final VoidCallback onRefreshRoute;
 
   @override
   Widget build(BuildContext context) {
-    final rate = TransportFareCalculator.rateFor(transportType);
+    final amount = routeEstimate == null
+        ? null
+        : routeEstimate!.estimatedFare +
+              (returnTrip ? (returnRouteEstimate?.estimatedFare ?? 0) : 0);
 
     return Container(
       width: double.infinity,
@@ -171,27 +263,49 @@ class _FareEstimate extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _FareTitle(
-                  routeEstimate: routeEstimate,
-                  isCalculatingRoute: isCalculatingRoute,
-                  routeError: routeError,
-                ),
-                Text(
-                  'R${rate.baseFare.toStringAsFixed(0)} base + R${rate.perKm.toStringAsFixed(0)}/km + R${rate.perMinute.toStringAsFixed(2)}/min',
-                  style: const TextStyle(
-                    color: Color(0xFF6B7280),
-                    fontSize: 12,
-                  ),
-                ),
-                if (routeEstimate != null) ...[
-                  const SizedBox(height: 4),
+                if (isCalculatingRoute)
+                  const Text(
+                    'Getting your amount...',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  )
+                else if (routeError != null)
                   Text(
-                    '${routeEstimate!.distanceKm.toStringAsFixed(1)} km - ${routeEstimate!.durationMinutes} min',
+                    routeError!,
                     style: const TextStyle(
-                      color: Color(0xFF416FDF),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                      color: Color(0xFFB91C1C),
+                      fontWeight: FontWeight.w900,
                     ),
+                  )
+                else if (amount == null)
+                  const Text(
+                    'Enter pickup and dropoff',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  )
+                else ...[
+                  Text(
+                    'Outbound estimate: R${routeEstimate!.estimatedFare.toStringAsFixed(0)}',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  if (returnTrip)
+                    if (isCalculatingReturnRoute)
+                      const Text('Calculating return estimate…')
+                    else if (returnRouteError != null)
+                      Text(
+                        returnRouteError!,
+                        style: const TextStyle(color: Color(0xFFB91C1C)),
+                      )
+                    else if (returnRouteEstimate != null)
+                      Text(
+                        'Return estimate: R${returnRouteEstimate!.estimatedFare.toStringAsFixed(0)}',
+                      ),
+                  if (!returnTrip || returnRouteEstimate != null)
+                    Text(
+                      'Total estimate: R${amount.toStringAsFixed(0)}',
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  const Text(
+                    'Final fare may vary after the pickup is confirmed.',
+                    style: TextStyle(fontSize: 12, color: Colors.black54),
                   ),
                 ],
               ],
@@ -209,50 +323,6 @@ class _FareEstimate extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _FareTitle extends StatelessWidget {
-  const _FareTitle({
-    required this.routeEstimate,
-    required this.isCalculatingRoute,
-    required this.routeError,
-  });
-
-  final TransportRouteEstimate? routeEstimate;
-  final bool isCalculatingRoute;
-  final String? routeError;
-
-  @override
-  Widget build(BuildContext context) {
-    if (isCalculatingRoute) {
-      return const Text(
-        'Calculating route and fare...',
-        style: TextStyle(fontWeight: FontWeight.w900),
-      );
-    }
-
-    if (routeError != null) {
-      return Text(
-        routeError!,
-        style: const TextStyle(
-          color: Color(0xFFB91C1C),
-          fontWeight: FontWeight.w900,
-        ),
-      );
-    }
-
-    if (routeEstimate == null) {
-      return const Text(
-        'Enter pickup and dropoff',
-        style: TextStyle(fontWeight: FontWeight.w900),
-      );
-    }
-
-    return Text(
-      'Estimated fare: R${routeEstimate!.estimatedFare.toStringAsFixed(0)}',
-      style: const TextStyle(fontWeight: FontWeight.w900),
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:riendzo/services/follow_service.dart';
 import 'package:riendzo/views/profile/widgets/stats_label.dart';
 
 class ProfileSummary extends StatefulWidget {
@@ -59,12 +60,38 @@ class _ProfileSummaryState extends State<ProfileSummary> {
                   dataLabel: 'Likes',
                   dataValue: tripLikes.toString(),
                 ),
-                const ProfileStatsLabel(dataLabel: 'Followers', dataValue: '0'),
-                const ProfileStatsLabel(dataLabel: 'Following', dataValue: '0'),
+                _FollowCount(label: 'Followers', followers: true),
+                _FollowCount(label: 'Following', followers: false),
               ],
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _FollowCount extends StatelessWidget {
+  final String label;
+  final bool followers;
+
+  const _FollowCount({required this.label, required this.followers});
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return ProfileStatsLabel(dataLabel: label, dataValue: '0');
+    }
+
+    final stream = followers
+        ? FollowService.followersStream(user.uid)
+        : FollowService.followingStream(user.uid);
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: stream,
+      builder: (context, snapshot) => ProfileStatsLabel(
+        dataLabel: label,
+        dataValue: (snapshot.data?.size ?? 0).toString(),
       ),
     );
   }

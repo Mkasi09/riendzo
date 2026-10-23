@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../widgets/Shared Widgets/home_avatars_row.dart';
 import '../../widgets/riendzo_sliver_app_bar.dart';
+import '../../widgets/notification_bell_button.dart';
 import '../my_trips/booking/booking_page.dart';
 import '../trips/trips.dart';
 
@@ -19,6 +20,7 @@ class Home extends StatelessWidget {
             title: 'Riendzo',
             subtitle: 'Discover your next trip',
             actions: [
+              const NotificationBellButton(),
               IconButton(
                 tooltip: 'Create trip',
                 onPressed: () => Navigator.push(

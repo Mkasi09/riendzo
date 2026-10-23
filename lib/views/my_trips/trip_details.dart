@@ -1,4 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:riendzo/services/app_image_cache.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart' as rtdb;
@@ -6,8 +7,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:riendzo/services/currency_formatter.dart';
+import 'package:riendzo/services/trip_booking_service.dart';
 import 'package:riendzo/services/user_notification_service.dart';
+import 'package:riendzo/services/payfast_payment_service.dart';
 import 'package:riendzo/views/my_trips/itinerary_editor_screen.dart';
+import 'package:riendzo/views/my_trips/trip_booking_screen.dart';
+import 'package:riendzo/views/my_trips/trip_chat_screen.dart';
 import 'package:riendzo/views/profile/user_profile_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -199,6 +204,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         .collection('trips')
         .doc(widget.tripId);
     final requestRef = request.reference;
+    Map<String, dynamic>? bookingTrip;
+    var approvedUserId = '';
 
     try {
       await FirebaseFirestore.instance.runTransaction((transaction) async {
@@ -209,6 +216,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         final tripData = tripSnapshot.data() as Map<String, dynamic>;
         final requestData = requestSnapshot.data() as Map<String, dynamic>;
         final userId = requestData['userId']?.toString() ?? request.id;
+        approvedUserId = userId;
+        bookingTrip = tripData;
         final participantIds = _participantIds(tripData);
         final currentGroupSize = _currentGroupSize(tripData);
         final maxGroupSize = _maxGroupSize(tripData, currentGroupSize);
@@ -237,6 +246,14 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
           'updatedAt': FieldValue.serverTimestamp(),
         });
       });
+
+      if (bookingTrip != null && approvedUserId.isNotEmpty) {
+        await TripBookingService.ensureConfirmedBooking(
+          tripId: widget.tripId,
+          userId: approvedUserId,
+          trip: bookingTrip!,
+        );
+      }
 
       final requestData = request.data() as Map<String, dynamic>;
       await UserNotificationService.create(
@@ -502,6 +519,22 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                               ),
                             ),
                         ],
+                        if (currentUserIsParticipant || isOwner) ...[
+                          const SizedBox(height: 16),
+                          _TripMemberActions(
+                            onOpenBooking: currentUserIsParticipant
+                                ? () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => TripBookingScreen(
+                                        tripId: widget.tripId,
+                                      ),
+                                    ),
+                                  )
+                                : null,
+                            onOpenChat: () => _openTripChat(tripName),
+                          ),
+                        ],
                         if (transport != null) ...[
                           const SizedBox(height: 16),
                           KeyedSubtree(
@@ -517,7 +550,15 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 16),
-                                _TransportCard(transport: transport),
+                                _TransportCard(
+                                  transport: transport,
+                                  onManage: isOwner
+                                      ? () => _showTransportOptions(transport)
+                                      : null,
+                                  onPay: isOwner
+                                      ? () => _resumeTransportPayment(transport)
+                                      : null,
+                                ),
                               ],
                             ),
                           ),
@@ -567,7 +608,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                         'cancelled',
                       ].contains(transport['status']?.toString()),
                   onManage: () => _navigateToEditTrip(context, widget.tripId),
-                  onDiscuss: () => _showCommentsPopup(context),
+                  onDiscuss: () => _openTripChat(tripName),
                   onNavigate: () => _openRouteMap(
                     destination: destination,
                     transport: transport,
@@ -581,6 +622,226 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  Future<void> _showTransportOptions(Map<String, dynamic> transport) async {
+    final status = transport['status']?.toString() ?? 'requested';
+    final canCancel = status == 'requested' || status == 'pending';
+    final canEditReturn =
+        transport['returnTrip'] == true &&
+        ![
+          'pickup_arrived_outbound',
+          'in_progress_outbound',
+          'pickup_arrived_return',
+          'in_progress',
+          'completed',
+          'cancelled',
+        ].contains(status);
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Manage transport',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'You can edit return details until the driver reaches the outbound pickup. Transport can be cancelled while a driver has not accepted it.',
+              ),
+              if (canEditReturn)
+                ListTile(
+                  leading: const Icon(Icons.edit_location_alt_outlined),
+                  title: const Text('Edit return details'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _editReturnTransport(transport);
+                  },
+                ),
+              if (canCancel)
+                ListTile(
+                  leading: const Icon(Icons.cancel_outlined, color: Colors.red),
+                  title: const Text('Cancel transport'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _cancelTransport();
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _resumeTransportPayment(Map<String, dynamic> transport) async {
+    final requestId = transport['transportRequestId']?.toString() ?? '';
+    if (requestId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Payment setup is still loading. Try again shortly.'),
+        ),
+      );
+      return;
+    }
+    final preference =
+        transport['paymentMethodPreference']?.toString() ?? 'card';
+    final method = PayfastPaymentMethod.values.firstWhere(
+      (item) => item.value == preference,
+      orElse: () => PayfastPaymentMethod.card,
+    );
+    try {
+      await PayfastPaymentService().startTransportPayment(
+        transportRequestId: requestId,
+        preferredMethod: method,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error is StateError
+                ? error.message
+                : 'Could not open secure payment.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _cancelTransport() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Cancel transport?'),
+        content: const Text(
+          'This cancels the driver request before a driver accepts it.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep request'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Cancel transport'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final tripRef = FirebaseFirestore.instance
+        .collection('trips')
+        .doc(widget.tripId);
+    final request = await FirebaseFirestore.instance
+        .collection('transport_requests')
+        .where('tripId', isEqualTo: widget.tripId)
+        .limit(1)
+        .get();
+    final batch = FirebaseFirestore.instance.batch();
+    batch.update(tripRef, {
+      'transport.status': 'cancelled',
+      'transport.cancelledAt': FieldValue.serverTimestamp(),
+    });
+    if (request.docs.isNotEmpty) {
+      batch.update(request.docs.first.reference, {
+        'status': 'cancelled',
+        'cancelledAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+    await batch.commit();
+  }
+
+  Future<void> _editReturnTransport(Map<String, dynamic> transport) async {
+    final pickup = TextEditingController(
+      text: transport['plannedReturnPickup']?.toString() ?? '',
+    );
+    final time = TextEditingController(
+      text: transport['returnPickupTime']?.toString() ?? '',
+    );
+    final values = await showDialog<(String, String)>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit return details'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: pickup,
+              decoration: const InputDecoration(
+                labelText: 'Return pickup location',
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: time,
+              decoration: const InputDecoration(
+                labelText: 'Return pickup time',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, (
+              pickup.text.trim(),
+              time.text.trim(),
+            )),
+            child: const Text('Save changes'),
+          ),
+        ],
+      ),
+    );
+    pickup.dispose();
+    time.dispose();
+    if (values == null || values.$1.isEmpty || values.$2.isEmpty) return;
+    final tripRef = FirebaseFirestore.instance
+        .collection('trips')
+        .doc(widget.tripId);
+    final request = await FirebaseFirestore.instance
+        .collection('transport_requests')
+        .where('tripId', isEqualTo: widget.tripId)
+        .limit(1)
+        .get();
+    final updates = <String, Object?>{
+      'plannedReturnPickup': values.$1,
+      'returnPickupTime': values.$2,
+      'returnEstimatedFare': null,
+      'returnDistanceKm': null,
+      'returnDurationMinutes': null,
+      'returnEstimateNeedsRefresh': true,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    final batch = FirebaseFirestore.instance.batch();
+    batch.update(tripRef, {
+      for (final entry in updates.entries)
+        'transport.${entry.key}': entry.value,
+    });
+    if (request.docs.isNotEmpty) {
+      batch.update(request.docs.first.reference, updates);
+    }
+    await batch.commit();
+  }
+
+  void _openTripChat(String tripName) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            TripChatScreen(tripId: widget.tripId, tripName: tripName),
       ),
     );
   }
@@ -894,7 +1155,7 @@ class _ImmersiveTripHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 560,
+      height: 400,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -915,7 +1176,7 @@ class _ImmersiveTripHeader extends StatelessWidget {
           Positioned(
             left: 20,
             right: 20,
-            bottom: 122,
+            bottom: 100,
             child: _HeaderTextBlock(
               images: images,
               selectedIndex: selectedIndex,
@@ -927,7 +1188,7 @@ class _ImmersiveTripHeader extends StatelessWidget {
           Positioned(
             left: 20,
             right: 20,
-            bottom: 30,
+            bottom: 18,
             child: _PhotoPreviewStrip(
               images: images,
               selectedIndex: selectedIndex,
@@ -1060,7 +1321,7 @@ class _PhotoPreviewStrip extends StatelessWidget {
     final slots = images.isEmpty ? <String>[] : images.take(4).toList();
 
     return SizedBox(
-      height: 82,
+      height: 66,
       child: Row(
         children: [
           for (var index = 0; index < 4; index++) ...[
@@ -1143,6 +1404,7 @@ class _MosaicImage extends StatelessWidget {
         onTap: onTap,
         child: CachedNetworkImage(
           imageUrl: url,
+          cacheManager: AppImageCache.instance,
           fit: BoxFit.cover,
           width: double.infinity,
           height: double.infinity,
@@ -2267,6 +2529,43 @@ class _JoinTripRequestPanel extends StatelessWidget {
   }
 }
 
+class _TripMemberActions extends StatelessWidget {
+  final VoidCallback? onOpenBooking;
+  final VoidCallback onOpenChat;
+
+  const _TripMemberActions({
+    required this.onOpenBooking,
+    required this.onOpenChat,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _SurfacePanel(
+      child: Row(
+        children: [
+          if (onOpenBooking != null) ...[
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: onOpenBooking,
+                icon: const Icon(Icons.receipt_long_outlined),
+                label: const Text('Booking'),
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
+          Expanded(
+            child: FilledButton.icon(
+              onPressed: onOpenChat,
+              icon: const Icon(Icons.forum_outlined),
+              label: const Text('Trip chat'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _OwnerJoinRequestsPanel extends StatelessWidget {
   final String tripId;
   final int currentGroupSize;
@@ -2977,17 +3276,22 @@ class _ContextualTripActionBar extends StatelessWidget {
 
 class _TransportCard extends StatelessWidget {
   final Map<String, dynamic> transport;
+  final VoidCallback? onManage;
+  final VoidCallback? onPay;
 
-  const _TransportCard({required this.transport});
+  const _TransportCard({required this.transport, this.onManage, this.onPay});
 
   @override
   Widget build(BuildContext context) {
     final status = (transport['status'] ?? 'requested').toString();
     final statusLabel = switch (status) {
       'accepted' => 'Driver assigned',
-      'pickupArrived' => 'Driver at pickup',
-      'inProgress' => 'Trip in progress',
+      'pickup_arrived' || 'pickup_arrived_outbound' => 'Driver has arrived',
+      'pickup_arrived_return' => 'Driver has arrived for return pickup',
+      'in_progress_outbound' => 'Outbound trip in progress',
+      'in_progress' => 'Return trip in progress',
       'completed' => 'Trip completed',
+      'cancelled' => 'Transport cancelled',
       _ => 'Finding a driver',
     };
     final type = (transport['type'] ?? 'Standard').toString();
@@ -2995,8 +3299,13 @@ class _TransportCard extends StatelessWidget {
     final dropoff = (transport['dropoff'] ?? 'Not set').toString();
     final driverName = (transport['driverName'] ?? '').toString();
     final fare = (transport['estimatedFare'] as num?)?.toDouble();
-    final distanceKm = (transport['distanceKm'] as num?)?.toDouble();
-    final durationMinutes = (transport['durationMinutes'] as num?)?.toInt();
+    final totalEstimate = (transport['totalEstimatedFare'] as num?)?.toDouble();
+    final finalFare = (transport['finalFare'] as num?)?.toDouble();
+    final receiptNumber = transport['receiptNumber']?.toString() ?? '';
+    final returnTrip = transport['returnTrip'] == true;
+    final paymentStatus = transport['paymentStatus']?.toString() ?? '';
+    final outboundOtp = transport['outboundPickupOtp']?.toString() ?? '';
+    final returnOtp = transport['returnPickupOtp']?.toString() ?? '';
 
     return _SurfacePanel(
       child: Column(
@@ -3040,6 +3349,12 @@ class _TransportCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (onManage != null)
+                IconButton(
+                  onPressed: onManage,
+                  icon: const Icon(Icons.more_horiz),
+                  tooltip: 'Manage transport',
+                ),
             ],
           ),
           const SizedBox(height: 16),
@@ -3047,32 +3362,129 @@ class _TransportCard extends StatelessWidget {
           const SizedBox(height: 16),
           _RouteLine(label: 'Pickup', value: pickup, active: true),
           _RouteLine(label: 'Dropoff', value: dropoff, active: false),
-          if (fare != null ||
-              distanceKm != null ||
-              durationMinutes != null) ...[
+          if (status == 'accepted') ...[
+            const SizedBox(height: 12),
+            const _MiniChip(
+              icon: Icons.directions_car_filled_outlined,
+              text: 'Driver is on the way',
+            ),
+          ],
+          if (outboundOtp.isNotEmpty &&
+              status != 'completed' &&
+              status != 'cancelled') ...[
+            const SizedBox(height: 14),
+            _OtpCard(
+              label: 'Outbound pickup OTP',
+              code: outboundOtp,
+              helper: 'Share this with the driver only when you are together.',
+            ),
+            if (returnTrip && returnOtp.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _OtpCard(
+                label: 'Return pickup OTP',
+                code: returnOtp,
+                helper: 'Use this code when starting the return ride.',
+              ),
+            ],
+          ],
+          if (fare != null || totalEstimate != null || finalFare != null) ...[
             const SizedBox(height: 14),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (fare != null)
+                if (finalFare != null)
+                  _MiniChip(
+                    icon: Icons.receipt_long_outlined,
+                    text: 'Final fare R${finalFare.toStringAsFixed(0)}',
+                  )
+                else if (totalEstimate != null)
                   _MiniChip(
                     icon: Icons.payments_outlined,
-                    text: 'R${fare.toStringAsFixed(0)} estimate',
-                  ),
-                if (distanceKm != null)
+                    text: 'Total estimate R${totalEstimate.toStringAsFixed(0)}',
+                  )
+                else
                   _MiniChip(
-                    icon: Icons.route_outlined,
-                    text: '${distanceKm.toStringAsFixed(1)} km',
+                    icon: Icons.payments_outlined,
+                    text: 'Estimate R${fare!.toStringAsFixed(0)}',
                   ),
-                if (durationMinutes != null)
-                  _MiniChip(
-                    icon: Icons.schedule_outlined,
-                    text: '$durationMinutes min',
-                  ),
+                _MiniChip(
+                  icon: returnTrip
+                      ? Icons.sync_alt_rounded
+                      : Icons.arrow_forward_rounded,
+                  text: returnTrip ? 'Return transport' : 'Pickup only',
+                ),
               ],
             ),
           ],
+          if (receiptNumber.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Receipt $receiptNumber · final amount recorded',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+          if ((paymentStatus == 'awaiting_payment' ||
+                  paymentStatus == 'payment_failed' ||
+                  paymentStatus == 'checkout_started') &&
+              onPay != null) ...[
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: onPay,
+              icon: const Icon(Icons.lock_outline),
+              label: Text(
+                paymentStatus == 'checkout_started'
+                    ? 'Continue secure payment'
+                    : 'Pay transport estimate',
+              ),
+            ),
+          ],
+          if (paymentStatus == 'pay_on_completion') ...[
+            const SizedBox(height: 10),
+            const _MiniChip(
+              icon: Icons.schedule_outlined,
+              text: 'Payment due on completion',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _OtpCard extends StatelessWidget {
+  const _OtpCard({
+    required this.label,
+    required this.code,
+    required this.helper,
+  });
+
+  final String label;
+  final String code;
+  final String helper;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: Theme.of(context).textTheme.labelLarge),
+          const SizedBox(height: 4),
+          Text(
+            code,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              letterSpacing: 4,
+            ),
+          ),
+          Text(helper, style: Theme.of(context).textTheme.bodySmall),
         ],
       ),
     );
@@ -3088,7 +3500,11 @@ class _TransportProgress extends StatelessWidget {
   Widget build(BuildContext context) {
     final current = switch (status) {
       'accepted' => 1,
-      'pickupArrived' || 'inProgress' => 2,
+      'pickup_arrived' ||
+      'pickup_arrived_outbound' ||
+      'in_progress_outbound' ||
+      'pickup_arrived_return' ||
+      'in_progress' => 2,
       'completed' => 3,
       _ => 0,
     };

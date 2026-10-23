@@ -8,6 +8,7 @@ import 'package:riendzo/views/feed/like_button_widget.dart';
 import 'package:riendzo/views/profile/user_profile_screen.dart';
 import 'package:riendzo/widgets/network_video_player.dart';
 import 'package:timeago/timeago.dart' as timeago;
+import 'package:riendzo/services/app_image_cache.dart';
 
 class PostDetailScreen extends StatefulWidget {
   final PostModel post;
@@ -149,7 +150,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   ),
                   if (widget.post.content.trim().isNotEmpty) ...[
                     const SizedBox(height: 16),
-                    Text(widget.post.content, style: theme.textTheme.bodyLarge),
+                    Text(
+                      widget.post.content,
+                      style: theme.textTheme.bodyLarge,
+                      textAlign: TextAlign.justify,
+                    ),
                   ],
                   if (widget.post.mediaPaths.isNotEmpty) ...[
                     const SizedBox(height: 18),
@@ -189,6 +194,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
                 return CachedNetworkImage(
                   imageUrl: media,
+                  cacheManager: AppImageCache.instance,
                   fit: BoxFit.cover,
                   placeholder: (context, url) => const Center(
                     child: CircularProgressIndicator(strokeWidth: 2),
@@ -555,7 +561,10 @@ class _PostAuthorHeader extends StatelessWidget {
                 CircleAvatar(
                   radius: 22,
                   backgroundImage: profilePicture.isNotEmpty
-                      ? NetworkImage(profilePicture)
+                      ? CachedNetworkImageProvider(
+                          profilePicture,
+                          cacheManager: AppImageCache.instance,
+                        )
                       : null,
                   child: profilePicture.isEmpty
                       ? const Icon(Icons.person)

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // For user authentication
 import 'package:flutter/material.dart';
@@ -8,9 +11,11 @@ import 'package:riendzo/views/feed/Post.dart';
 import 'package:riendzo/views/feed/widgets/post_media_carousel.dart';
 import 'package:riendzo/views/inbox/inbox.dart';
 import 'package:riendzo/views/my_trips/trip_details.dart';
-import 'package:riendzo/views/notifications/notifications_screen.dart';
+import 'package:riendzo/widgets/notification_bell_button.dart';
 import 'package:riendzo/views/profile/profile.dart';
 import 'package:riendzo/views/profile/user_profile_screen.dart';
+import 'package:riendzo/services/follow_service.dart';
+import 'package:riendzo/services/app_image_cache.dart';
 import 'package:riendzo/widgets/riendzo_sliver_app_bar.dart';
 import 'package:riendzo/widgets/network_video_player.dart';
 import '../../widgets/Shared Widgets/avatars_row.dart';
@@ -41,6 +46,8 @@ class _FeedScreenState extends State<FeedScreen> {
   _FeedFilter _selectedFilter = _FeedFilter.forYou;
   final Set<String> _savedPostIds = {};
   final Set<String> _followingUserIds = {};
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _followingSubscription;
   final Map<String, Future<Map<String, dynamic>>> _userDataCache = {};
   String _currentCity = '';
 
@@ -49,6 +56,23 @@ class _FeedScreenState extends State<FeedScreen> {
     super.initState();
     _currentUser = _auth.currentUser;
     _loadFeedPreferences();
+    _watchFollowing();
+  }
+
+  void _watchFollowing() {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    _followingSubscription = FollowService.followingStream(user.uid).listen((
+      event,
+    ) {
+      final followingIds = event.docs.map((document) => document.id).toSet();
+      if (!mounted) return;
+      setState(() {
+        _followingUserIds
+          ..clear()
+          ..addAll(followingIds);
+      });
+    });
   }
 
   Future<void> _loadFeedPreferences() async {
@@ -68,25 +92,11 @@ class _FeedScreenState extends State<FeedScreen> {
       final profile = results[1] as DataSnapshot;
       final raw = profile.value;
       final userData = raw is Map ? raw : const {};
-      final following = userData['following'];
-      final followingIds = <String>{};
-      if (following is Map) {
-        following.forEach((key, value) {
-          if (value != false) followingIds.add(key.toString());
-        });
-      } else if (following is List) {
-        followingIds.addAll(
-          following.whereType<String>().where((id) => id.isNotEmpty),
-        );
-      }
       if (!mounted) return;
       setState(() {
         _savedPostIds
           ..clear()
           ..addAll(saved.docs.map((doc) => doc.id));
-        _followingUserIds
-          ..clear()
-          ..addAll(followingIds);
         _currentCity = (userData['city'] ?? userData['location'] ?? '')
             .toString()
             .trim();
@@ -235,16 +245,7 @@ class _FeedScreenState extends State<FeedScreen> {
                 ),
                 icon: const Icon(Icons.chat_bubble_outline_rounded),
               ),
-              IconButton(
-                tooltip: 'Notifications',
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const NotificationsScreen(),
-                  ),
-                ),
-                icon: const Icon(Icons.notifications_none_rounded),
-              ),
+              const NotificationBellButton(),
               const SizedBox(width: 6),
             ],
           ),
@@ -515,7 +516,10 @@ class _FeedScreenState extends State<FeedScreen> {
                                           'lib/assets/images/profile/p2.png',
                                         )
                                         as ImageProvider
-                                  : NetworkImage(profilePicture),
+                                  : CachedNetworkImageProvider(
+                                      profilePicture,
+                                      cacheManager: AppImageCache.instance,
+                                    ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
@@ -547,6 +551,10 @@ class _FeedScreenState extends State<FeedScreen> {
                     },
                   ),
                 ),
+                if (post.userId != _currentUser?.uid) ...[
+                  const SizedBox(width: 6),
+                  _PostFollowButton(targetUserId: post.userId),
+                ],
                 PopupMenuButton<String>(
                   onSelected: (value) {
                     if (value == 'delete') _deletePost(post);
@@ -573,7 +581,11 @@ class _FeedScreenState extends State<FeedScreen> {
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
               child: InkWell(
                 onTap: () => _openPostDetail(post),
-                child: Text(post.content, style: theme.textTheme.bodyLarge),
+                child: Text(
+                  post.content,
+                  style: theme.textTheme.bodyLarge,
+                  textAlign: TextAlign.justify,
+                ),
               ),
             ),
           if (post.tripId != null && post.tripId!.isNotEmpty)
@@ -759,7 +771,11 @@ class _FeedScreenState extends State<FeedScreen> {
                                                 'lib/assets/images/profile/p2.png',
                                               )
                                               as ImageProvider
-                                        : NetworkImage(profilePicture),
+                                        : CachedNetworkImageProvider(
+                                            profilePicture,
+                                            cacheManager:
+                                                AppImageCache.instance,
+                                          ),
                                   ),
                                   const SizedBox(width: 8),
                                   Column(
@@ -803,7 +819,7 @@ class _FeedScreenState extends State<FeedScreen> {
                   Text(
                     post.content,
                     style: theme.textTheme.bodyLarge,
-                    textAlign: TextAlign.left,
+                    textAlign: TextAlign.justify,
                   ),
                 ],
               ),
@@ -961,7 +977,10 @@ class _FeedScreenState extends State<FeedScreen> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(7),
           image: DecorationImage(
-            image: NetworkImage(mediaPaths[0]),
+            image: CachedNetworkImageProvider(
+              mediaPaths[0],
+              cacheManager: AppImageCache.instance,
+            ),
             fit: BoxFit.cover,
           ),
         ),
@@ -987,11 +1006,17 @@ class _FeedScreenState extends State<FeedScreen> {
           }
 
           // If it's an image, display it
-          return Image.network(
-            media, // The URL of the image
+          return CachedNetworkImage(
+            imageUrl: media,
+            cacheManager: AppImageCache.instance,
             fit: BoxFit.cover,
-            width: screenWidth / 2, // Half the screen width for grid items
-            height: screenWidth / 2, // Ensure it is square
+            width: screenWidth / 2,
+            height: screenWidth / 2,
+            memCacheWidth: (screenWidth * 2).round(),
+            placeholder: (context, url) =>
+                const ColoredBox(color: Color(0xFFF1F5F9)),
+            errorWidget: (context, url, error) =>
+                const Icon(Icons.broken_image_outlined),
           );
         },
       );
@@ -1053,6 +1078,83 @@ class _FeedScreenState extends State<FeedScreen> {
         );
       }
     }
+  }
+
+  @override
+  void dispose() {
+    _followingSubscription?.cancel();
+    super.dispose();
+  }
+}
+
+class _PostFollowButton extends StatefulWidget {
+  final String targetUserId;
+
+  const _PostFollowButton({required this.targetUserId});
+
+  @override
+  State<_PostFollowButton> createState() => _PostFollowButtonState();
+}
+
+class _PostFollowButtonState extends State<_PostFollowButton> {
+  bool _updating = false;
+
+  Future<void> _setFollowing(bool shouldFollow) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || _updating) return;
+    setState(() => _updating = true);
+    try {
+      await FollowService.setFollowing(
+        followerId: user.uid,
+        targetUserId: widget.targetUserId,
+        shouldFollow: shouldFollow,
+        followerName: user.displayName ?? user.email ?? 'A traveler',
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not update follow status.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _updating = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.uid == widget.targetUserId) {
+      return const SizedBox.shrink();
+    }
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FollowService.relationshipStream(
+        followerId: user.uid,
+        targetUserId: widget.targetUserId,
+      ),
+      builder: (context, snapshot) {
+        final following = FollowService.isFollowing(snapshot.data);
+        return SizedBox(
+          height: 34,
+          child: following
+              ? OutlinedButton(
+                  onPressed: _updating ? null : () => _setFollowing(false),
+                  child: const Text('Following'),
+                )
+              : FilledButton(
+                  onPressed: _updating ? null : () => _setFollowing(true),
+                  child: _updating
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Follow'),
+                ),
+        );
+      },
+    );
   }
 }
 

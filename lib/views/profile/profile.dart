@@ -1,9 +1,9 @@
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:riendzo/services/app_image_cache.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -13,8 +13,9 @@ import 'package:riendzo/views/inbox/inbox.dart';
 import 'package:riendzo/views/my_trips/my_trips.dart';
 import 'package:riendzo/views/notifications/notifications_screen.dart';
 import 'package:riendzo/views/profile/ContactUsScreen.dart';
-import 'package:riendzo/views/profile/widgets/profile_card.dart';
+import 'package:riendzo/views/profile/settings_screen.dart';
 import 'package:riendzo/views/profile/widgets/profile_summary.dart';
+import 'package:riendzo/services/user_repository.dart';
 import 'package:riendzo/widgets/network_video_player.dart';
 import 'package:riendzo/widgets/riendzo_sliver_app_bar.dart';
 import 'package:timeago/timeago.dart' as timeago;
@@ -41,6 +42,16 @@ class _ProfileState extends State<Profile> {
   User? get _currentUser => _auth.currentUser;
 
   @override
+  void initState() {
+    super.initState();
+    UserRepository.migrateCurrentUserFromRealtimeDatabase()
+        .then((_) {
+          if (mounted) setState(() {});
+        })
+        .catchError((_) {});
+  }
+
+  @override
   void dispose() {
     _nameController.dispose();
     super.dispose();
@@ -52,13 +63,8 @@ class _ProfileState extends State<Profile> {
       return {'fullName': 'Guest', 'email': '', 'profilePicture': ''};
     }
 
-    final snapshot = await FirebaseDatabase.instance
-        .ref()
-        .child('users')
-        .child(user.uid)
-        .get();
-
-    if (!snapshot.exists) {
+    final data = await UserRepository.getProfile(user.uid);
+    if (data == null) {
       return {
         'fullName': user.displayName ?? 'Traveller',
         'email': user.email ?? '',
@@ -66,10 +72,9 @@ class _ProfileState extends State<Profile> {
       };
     }
 
-    final fullName = snapshot.child('name').value as String? ?? 'Traveller';
-    final email = snapshot.child('email').value as String? ?? user.email ?? '';
-    final profilePicture =
-        snapshot.child('profilePicture').value as String? ?? '';
+    final fullName = data['name']?.toString() ?? 'Traveller';
+    final email = data['email']?.toString() ?? user.email ?? '';
+    final profilePicture = data['profilePicture']?.toString() ?? '';
 
     _nameController.text = fullName;
     _profilePictureUrl = profilePicture;
@@ -82,11 +87,9 @@ class _ProfileState extends State<Profile> {
   }
 
   Future<Map<String, dynamic>> _getUserDataForPost(String userId) async {
-    final event = await FirebaseDatabase.instance.ref('users/$userId').once();
-    final snapshot = event.snapshot;
+    final userData = await UserRepository.getProfile(userId);
 
-    if (snapshot.exists && snapshot.value is Map) {
-      final userData = Map<dynamic, dynamic>.from(snapshot.value as Map);
+    if (userData != null) {
       final profilePicture = (userData['profilePicture'] ?? '').toString();
       return {
         'profilePicture': profilePicture,
@@ -107,8 +110,11 @@ class _ProfileState extends State<Profile> {
     final newName = _nameController.text.trim();
     if (user == null || newName.isEmpty) return;
 
-    await FirebaseDatabase.instance.ref().child('users').child(user.uid).update(
-      {'name': newName},
+    await UserRepository.saveProfile(
+      userId: user.uid,
+      name: newName,
+      email: user.email ?? '',
+      profilePicture: _profilePictureUrl ?? '',
     );
 
     if (!mounted) return;
@@ -146,8 +152,13 @@ class _ProfileState extends State<Profile> {
     if (image == null || user == null) return;
 
     final downloadUrl = await _uploadImage(image);
-    await FirebaseDatabase.instance.ref().child('users').child(user.uid).update(
-      {'profilePicture': downloadUrl},
+    await UserRepository.saveProfile(
+      userId: user.uid,
+      name: _nameController.text.trim().isEmpty
+          ? 'Traveller'
+          : _nameController.text.trim(),
+      email: user.email ?? '',
+      profilePicture: downloadUrl,
     );
 
     if (!mounted) return;
@@ -234,6 +245,7 @@ class _ProfileState extends State<Profile> {
             aspectRatio: 1,
             child: CachedNetworkImage(
               imageUrl: profilePictureUrl,
+              cacheManager: AppImageCache.instance,
               placeholder: (context, url) =>
                   const Center(child: CircularProgressIndicator()),
               errorWidget: (context, url, error) =>
@@ -250,14 +262,57 @@ class _ProfileState extends State<Profile> {
     await FirebaseAuth.instance.signOut();
   }
 
+  Future<void> _confirmSignOut() async {
+    final shouldSignOut = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Log out?'),
+        content: const Text('You can sign back in whenever you are ready.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+    if (shouldSignOut == true) await signOut();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: _ProfileDrawer(
+        userDataFuture: _getUserData(),
+        onNotificationsTap: () =>
+            _openDrawerScreen(const NotificationsScreen()),
+        onTripsTap: () => _openDrawerScreen(const MyTrips()),
+        onInboxTap: () => _openDrawerScreen(const Inbox()),
+        onSettingsTap: () => _openDrawerScreen(const ProfileSettingsScreen()),
+        onLegalTap: () => _openDrawerScreen(LegalInformationScreen()),
+        onHelpTap: () => _openDrawerScreen(SupportCenterScreen()),
+        onContactTap: () => _openDrawerScreen(ContactUsScreen()),
+        onLogoutTap: _confirmSignOut,
+      ),
       body: NestedScrollView(
-        headerSliverBuilder: (context, innerBoxIsScrolled) => const [
+        headerSliverBuilder: (context, innerBoxIsScrolled) => [
           RiendzoSliverAppBar(
             title: 'Profile',
             subtitle: 'Your trips, posts, and account',
+            actions: [
+              Builder(
+                builder: (context) => IconButton(
+                  tooltip: 'Profile menu',
+                  icon: const Icon(Icons.menu_rounded),
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
           ),
         ],
         body: SafeArea(
@@ -315,111 +370,6 @@ class _ProfileState extends State<Profile> {
                           ),
                           const SizedBox(height: 14),
                           const ProfileSummary(),
-                          const SizedBox(height: 14),
-                          _ProfileActionSection(
-                            title: 'General',
-                            children: [
-                              ProfileCard(
-                                leadingIcon: const Icon(
-                                  Icons.notifications_none_rounded,
-                                ),
-                                textTitle: 'Notifications',
-                                trailingIcon: Icons.chevron_right_rounded,
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          const NotificationsScreen(),
-                                    ),
-                                  );
-                                },
-                              ),
-                              ProfileCard(
-                                leadingIcon: const Icon(Icons.map_outlined),
-                                textTitle: 'My Trips',
-                                trailingIcon: Icons.chevron_right_rounded,
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => const MyTrips(),
-                                    ),
-                                  );
-                                },
-                              ),
-                              ProfileCard(
-                                leadingIcon: const Icon(
-                                  Icons.account_balance_wallet,
-                                ),
-                                textTitle: 'Wallet',
-                                trailingIcon: Icons.chevron_right_rounded,
-                                onTap: () => _showComingSoon('Wallet'),
-                              ),
-                              ProfileCard(
-                                leadingIcon: const Icon(Icons.people_outline),
-                                textTitle: 'Travellers',
-                                trailingIcon: Icons.chevron_right_rounded,
-                                onTap: () => _showComingSoon('Travellers'),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          _ProfileActionSection(
-                            title: 'Support',
-                            children: [
-                              ProfileCard(
-                                leadingIcon: const Icon(Icons.info_outline),
-                                textTitle: 'Legal Information',
-                                trailingIcon: Icons.chevron_right_rounded,
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          LegalInformationScreen(),
-                                    ),
-                                  );
-                                },
-                              ),
-                              ProfileCard(
-                                leadingIcon: const Icon(Icons.help_outline),
-                                textTitle: 'Help Center',
-                                trailingIcon: Icons.chevron_right_rounded,
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          SupportCenterScreen(),
-                                    ),
-                                  );
-                                },
-                              ),
-                              ProfileCard(
-                                leadingIcon: const Icon(
-                                  Icons.contact_support_outlined,
-                                ),
-                                textTitle: 'Contact Us',
-                                trailingIcon: Icons.chevron_right_rounded,
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => ContactUsScreen(),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          ProfileCard(
-                            leadingIcon: const Icon(Icons.logout_rounded),
-                            textTitle: 'Logout',
-                            trailingIcon: Icons.chevron_right_rounded,
-                            onTap: signOut,
-                          ),
                           const SizedBox(height: 22),
                           Text(
                             'Your Posts',
@@ -446,10 +396,9 @@ class _ProfileState extends State<Profile> {
     );
   }
 
-  void _showComingSoon(String feature) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('$feature is coming soon')));
+  void _openDrawerScreen(Widget screen) {
+    Navigator.pop(context);
+    Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
   }
 
   Future<List<PostModel>> _getPostsWithLikes(
@@ -636,6 +585,7 @@ class _ProfileState extends State<Profile> {
         aspectRatio: 4 / 3,
         child: CachedNetworkImage(
           imageUrl: media,
+          cacheManager: AppImageCache.instance,
           fit: BoxFit.cover,
           placeholder: (context, url) =>
               const Center(child: CircularProgressIndicator()),
@@ -670,6 +620,7 @@ class _ProfileState extends State<Profile> {
           borderRadius: BorderRadius.circular(12),
           child: CachedNetworkImage(
             imageUrl: media,
+            cacheManager: AppImageCache.instance,
             fit: BoxFit.cover,
             errorWidget: (context, url, error) =>
                 const Icon(Icons.broken_image_outlined),
@@ -734,6 +685,166 @@ class _ProfileState extends State<Profile> {
   String _formatTimestamp(Timestamp? timestamp) {
     if (timestamp == null) return "Unknown time";
     return timeago.format(timestamp.toDate());
+  }
+}
+
+class _ProfileDrawer extends StatelessWidget {
+  final Future<Map<String, String>> userDataFuture;
+  final VoidCallback onNotificationsTap;
+  final VoidCallback onTripsTap;
+  final VoidCallback onInboxTap;
+  final VoidCallback onSettingsTap;
+  final VoidCallback onLegalTap;
+  final VoidCallback onHelpTap;
+  final VoidCallback onContactTap;
+  final VoidCallback onLogoutTap;
+
+  const _ProfileDrawer({
+    required this.userDataFuture,
+    required this.onNotificationsTap,
+    required this.onTripsTap,
+    required this.onInboxTap,
+    required this.onSettingsTap,
+    required this.onLegalTap,
+    required this.onHelpTap,
+    required this.onContactTap,
+    required this.onLogoutTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Drawer(
+      child: SafeArea(
+        child: FutureBuilder<Map<String, String>>(
+          future: userDataFuture,
+          builder: (context, snapshot) {
+            final user = snapshot.data ?? const <String, String>{};
+            final picture = user['profilePicture'] ?? '';
+            return ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 24,
+                        backgroundColor: colors.primaryContainer,
+                        backgroundImage: picture.isNotEmpty
+                            ? CachedNetworkImageProvider(picture)
+                            : null,
+                        child: picture.isEmpty
+                            ? Icon(Icons.person_rounded, color: colors.primary)
+                            : null,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              user['fullName'] ?? 'Traveller',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              user['email'] ?? '',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                _DrawerItem(
+                  icon: Icons.notifications_none_rounded,
+                  label: 'Notifications',
+                  onTap: onNotificationsTap,
+                ),
+                _DrawerItem(
+                  icon: Icons.map_outlined,
+                  label: 'My trips',
+                  onTap: onTripsTap,
+                ),
+                _DrawerItem(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  label: 'Inbox',
+                  onTap: onInboxTap,
+                ),
+                _DrawerItem(
+                  icon: Icons.settings_outlined,
+                  label: 'Settings',
+                  onTap: onSettingsTap,
+                ),
+                const Divider(height: 32),
+                _DrawerItem(
+                  icon: Icons.help_outline_rounded,
+                  label: 'Help center',
+                  onTap: onHelpTap,
+                ),
+                _DrawerItem(
+                  icon: Icons.contact_support_outlined,
+                  label: 'Contact us',
+                  onTap: onContactTap,
+                ),
+                _DrawerItem(
+                  icon: Icons.info_outline_rounded,
+                  label: 'Legal information',
+                  onTap: onLegalTap,
+                ),
+                const Divider(height: 32),
+                _DrawerItem(
+                  icon: Icons.logout_rounded,
+                  label: 'Log out',
+                  danger: true,
+                  onTap: onLogoutTap,
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _DrawerItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool danger;
+
+  const _DrawerItem({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.danger = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = danger
+        ? Theme.of(context).colorScheme.error
+        : Theme.of(context).colorScheme.onSurface;
+    return ListTile(
+      leading: Icon(icon, color: color),
+      title: Text(
+        label,
+        style: TextStyle(color: color, fontWeight: FontWeight.w600),
+      ),
+      trailing: Icon(
+        Icons.chevron_right_rounded,
+        color: color.withValues(alpha: 0.62),
+      ),
+      onTap: onTap,
+    );
   }
 }
 
@@ -843,30 +954,6 @@ class _ProfileHeader extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _ProfileActionSection extends StatelessWidget {
-  final String title;
-  final List<Widget> children;
-
-  const _ProfileActionSection({required this.title, required this.children});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 8),
-          child: Text(title, style: Theme.of(context).textTheme.titleLarge),
-        ),
-        ...children.map(
-          (child) =>
-              Padding(padding: const EdgeInsets.only(bottom: 8), child: child),
-        ),
-      ],
     );
   }
 }

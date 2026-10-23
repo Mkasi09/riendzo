@@ -9,6 +9,7 @@ class UserNotificationService {
     required String title,
     required String message,
     String? tripId,
+    String? tripName,
     String? actorUserId,
   }) async {
     if (userId.trim().isEmpty) return;
@@ -22,6 +23,7 @@ class UserNotificationService {
           'title': title,
           'message': message,
           'tripId': tripId,
+          'tripName': tripName,
           'actorUserId': actorUserId,
           'read': false,
           'createdAt': FieldValue.serverTimestamp(),
@@ -40,5 +42,20 @@ class UserNotificationService {
         .collection('items')
         .doc(notificationId)
         .update({'read': true});
+  }
+
+  static Future<void> markAllRead(String userId) async {
+    if (userId.trim().isEmpty) return;
+    final unread = await FirebaseFirestore.instance
+        .collection('user_notifications')
+        .doc(userId)
+        .collection('items')
+        .where('read', isEqualTo: false)
+        .get();
+    final batch = FirebaseFirestore.instance.batch();
+    for (final item in unread.docs) {
+      batch.update(item.reference, {'read': true});
+    }
+    if (unread.docs.isNotEmpty) await batch.commit();
   }
 }

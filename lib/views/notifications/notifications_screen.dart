@@ -3,7 +3,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:riendzo/services/user_notification_service.dart';
+import 'package:riendzo/services/trip_booking_service.dart';
 import 'package:riendzo/views/my_trips/trip_details.dart';
+import 'package:riendzo/views/my_trips/trip_chat_screen.dart';
 import 'package:riendzo/views/profile/user_profile_screen.dart';
 
 class NotificationsScreen extends StatelessWidget {
@@ -14,7 +16,16 @@ class NotificationsScreen extends StatelessWidget {
     final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Notifications')),
+      appBar: AppBar(
+        title: const Text('Notifications'),
+        actions: [
+          if (user != null)
+            TextButton(
+              onPressed: () => UserNotificationService.markAllRead(user.uid),
+              child: const Text('Read all'),
+            ),
+        ],
+      ),
       body: user == null
           ? const _NotificationMessage(
               icon: Icons.lock_outline_rounded,
@@ -98,7 +109,9 @@ class _NotificationCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        onTap: tripId.isEmpty ? () => _markRead() : () => _openTrip(context),
+        onTap: tripId.isEmpty
+            ? () => _markRead()
+            : () => _openDestination(context),
         child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -180,7 +193,8 @@ class _NotificationCard extends StatelessWidget {
                       ),
                     ),
                   ] else ...[
-                    if (actorUserId.isNotEmpty && type == 'join_request') ...[
+                    if (actorUserId.isNotEmpty &&
+                        (type == 'join_request' || type == 'new_follower')) ...[
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: () => _openProfile(context, actorUserId),
@@ -193,9 +207,13 @@ class _NotificationCard extends StatelessWidget {
                     if (tripId.isNotEmpty)
                       Expanded(
                         child: FilledButton.icon(
-                          onPressed: () => _openTrip(context),
-                          icon: const Icon(Icons.route_outlined),
-                          label: const Text('Trip'),
+                          onPressed: () => _openDestination(context),
+                          icon: Icon(
+                            type == 'trip_message'
+                                ? Icons.forum_outlined
+                                : Icons.route_outlined,
+                          ),
+                          label: Text(type == 'trip_message' ? 'Chat' : 'Trip'),
                         ),
                       )
                     else
@@ -221,9 +239,12 @@ class _NotificationCard extends StatelessWidget {
       'trip_invite' => Icons.mail_outline_rounded,
       'invite_accepted' => Icons.mark_email_read_outlined,
       'invite_declined' => Icons.cancel_outlined,
+      'new_follower' => Icons.person_add_alt_1_outlined,
       'join_request' => Icons.person_add_alt_1_outlined,
       'join_approved' => Icons.check_circle_outline_rounded,
       'join_declined' => Icons.cancel_outlined,
+      'trip_message' => Icons.forum_outlined,
+      'booking_cancelled' => Icons.event_busy_outlined,
       _ => Icons.notifications_none_rounded,
     };
   }
@@ -247,6 +268,27 @@ class _NotificationCard extends StatelessWidget {
       context,
       MaterialPageRoute(builder: (context) => TripDetailScreen(tripId: tripId)),
     );
+  }
+
+  Future<void> _openDestination(BuildContext context) async {
+    final data = notification.data() as Map<String, dynamic>;
+    if (data['type']?.toString() == 'trip_message') {
+      await _markRead();
+      if (!context.mounted) return;
+      final tripId = data['tripId']?.toString() ?? '';
+      if (tripId.isEmpty) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => TripChatScreen(
+            tripId: tripId,
+            tripName: data['tripName']?.toString() ?? 'Trip chat',
+          ),
+        ),
+      );
+      return;
+    }
+    await _openTrip(context);
   }
 
   Future<void> _openProfile(BuildContext context, String actorUserId) async {
@@ -278,12 +320,14 @@ class _NotificationCard extends StatelessWidget {
     try {
       var ownerId = data['actorUserId']?.toString() ?? '';
       var tripName = 'this trip';
+      Map<String, dynamic>? bookingTrip;
 
       await FirebaseFirestore.instance.runTransaction((transaction) async {
         final tripSnapshot = await transaction.get(tripRef);
         if (!tripSnapshot.exists) return;
 
         final tripData = tripSnapshot.data() as Map<String, dynamic>;
+        bookingTrip = tripData;
         ownerId = tripData['userId']?.toString() ?? ownerId;
         tripName = tripData['tripName']?.toString() ?? tripName;
 
@@ -326,6 +370,14 @@ class _NotificationCard extends StatelessWidget {
           'respondedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
       });
+
+      if (accepted && bookingTrip != null) {
+        await TripBookingService.ensureConfirmedBooking(
+          tripId: tripId,
+          userId: user.uid,
+          trip: bookingTrip!,
+        );
+      }
 
       await notification.reference.update({
         'read': true,
