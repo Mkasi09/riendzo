@@ -1,11 +1,13 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_database/firebase_database.dart' as rtdb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:riendzo/services/currency_formatter.dart';
+import 'package:riendzo/services/payfast_service.dart';
 import 'package:riendzo/services/user_notification_service.dart';
 import 'package:riendzo/views/my_trips/itinerary_editor_screen.dart';
 import 'package:riendzo/views/profile/user_profile_screen.dart';
@@ -31,6 +33,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   int commentCount = 0;
   int selectedImageIndex = 0;
   bool isSaved = false;
+  bool _isStartingTransportPayment = false;
   _TripDetailSection selectedSection = _TripDetailSection.overview;
   final overviewKey = GlobalKey();
   final itineraryKey = GlobalKey();
@@ -296,6 +299,48 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not decline this request.')),
       );
+    }
+  }
+
+  Future<void> _startTransportPayment() async {
+    if (_isStartingTransportPayment) return;
+    setState(() => _isStartingTransportPayment = true);
+    try {
+      final checkoutUri = await PayFastService.createTransportCheckout(
+        tripId: widget.tripId,
+      );
+      final opened = await launchUrl(
+        checkoutUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened) {
+        throw StateError('The PayFast sandbox checkout could not be opened.');
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Complete the transport payment in PayFast. Riendzo will mark it paid after secure confirmation.',
+            ),
+          ),
+        );
+      }
+    } on FirebaseFunctionsException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error.message ?? 'Could not start the PayFast sandbox checkout.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not start the PayFast checkout: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _isStartingTransportPayment = false);
     }
   }
 
@@ -566,6 +611,12 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                         'completed',
                         'cancelled',
                       ].contains(transport['status']?.toString()),
+                  transportPaymentStatus:
+                      transport?['paymentStatus']?.toString() ?? '',
+                  transportFee: (transport?['estimatedFare'] as num?)
+                      ?.toDouble(),
+                  isStartingTransportPayment: _isStartingTransportPayment,
+                  onPayTransport: _startTransportPayment,
                   onManage: () => _navigateToEditTrip(context, widget.tripId),
                   onDiscuss: () => _showCommentsPopup(context),
                   onNavigate: () => _openRouteMap(
@@ -2869,6 +2920,10 @@ class _ContextualTripActionBar extends StatelessWidget {
   final bool isParticipant;
   final bool isFull;
   final bool hasActiveTransport;
+  final String transportPaymentStatus;
+  final double? transportFee;
+  final bool isStartingTransportPayment;
+  final Future<void> Function() onPayTransport;
   final VoidCallback onManage;
   final VoidCallback onDiscuss;
   final VoidCallback onNavigate;
@@ -2880,6 +2935,10 @@ class _ContextualTripActionBar extends StatelessWidget {
     required this.isParticipant,
     required this.isFull,
     required this.hasActiveTransport,
+    required this.transportPaymentStatus,
+    required this.transportFee,
+    required this.isStartingTransportPayment,
+    required this.onPayTransport,
     required this.onManage,
     required this.onDiscuss,
     required this.onNavigate,
@@ -2917,6 +2976,46 @@ class _ContextualTripActionBar extends StatelessWidget {
 
   Widget _primaryAction(BuildContext context) {
     if (isOwner) {
+      if (hasActiveTransport &&
+          transportPaymentStatus != 'paid' &&
+          (transportFee ?? 0) > 0) {
+        final actionLabel = transportPaymentStatus == 'pending'
+            ? 'Resume payment'
+            : transportPaymentStatus == 'failed'
+            ? 'Retry transport payment'
+            : 'Pay transport fee';
+        return Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: isStartingTransportPayment
+                    ? null
+                    : () => onPayTransport(),
+                icon: isStartingTransportPayment
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.payment_rounded),
+                label: Text(
+                  isStartingTransportPayment
+                      ? 'Opening PayFast...'
+                      : '$actionLabel · ${CurrencyFormatter.formatRand(transportFee)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            IconButton.filledTonal(
+              tooltip: 'Manage trip',
+              onPressed: onManage,
+              icon: const Icon(Icons.tune_rounded),
+            ),
+          ],
+        );
+      }
       return FilledButton.icon(
         onPressed: onManage,
         icon: const Icon(Icons.tune_rounded),
@@ -2997,6 +3096,7 @@ class _TransportCard extends StatelessWidget {
     final fare = (transport['estimatedFare'] as num?)?.toDouble();
     final distanceKm = (transport['distanceKm'] as num?)?.toDouble();
     final durationMinutes = (transport['durationMinutes'] as num?)?.toInt();
+    final paymentStatus = transport['paymentStatus']?.toString() ?? '';
 
     return _SurfacePanel(
       child: Column(
@@ -3059,6 +3159,18 @@ class _TransportCard extends StatelessWidget {
                   _MiniChip(
                     icon: Icons.payments_outlined,
                     text: 'R${fare.toStringAsFixed(0)} estimate',
+                  ),
+                if (paymentStatus.isNotEmpty)
+                  _MiniChip(
+                    icon: paymentStatus == 'paid'
+                        ? Icons.check_circle_outline
+                        : Icons.schedule_outlined,
+                    text: switch (paymentStatus) {
+                      'paid' => 'Transport fee paid',
+                      'pending' => 'Payment pending',
+                      'failed' => 'Payment failed',
+                      _ => 'Payment $paymentStatus',
+                    },
                   ),
                 if (distanceKm != null)
                   _MiniChip(
