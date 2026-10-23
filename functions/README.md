@@ -9,10 +9,12 @@ secrets; do not put them in Flutter configuration or commit them:
 
 ```powershell
 firebase functions:secrets:set PAYFAST_MERCHANT_ID
-firebase functions:secrets:set PAYFAST_MERCHANT_KEY
 firebase functions:secrets:set PAYFAST_PASSPHRASE
 firebase deploy --only functions
 ```
+
+Only the merchant ID and passphrase are needed for the signed hosted checkout.
+The merchant key is not sent to the app or PayFast checkout URL.
 
 The functions use `us-central1` and the Firebase project selected by
 `.firebaserc`. Checkout and ITN validation are pinned to

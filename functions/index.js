@@ -11,7 +11,6 @@ initializeApp();
 
 const db = getFirestore();
 const merchantId = defineSecret('PAYFAST_MERCHANT_ID');
-const merchantKey = defineSecret('PAYFAST_MERCHANT_KEY');
 const passphrase = defineSecret('PAYFAST_PASSPHRASE');
 const region = 'us-central1';
 const sandboxProcessUrl = 'https://sandbox.payfast.co.za/eng/process';
@@ -27,7 +26,7 @@ function sameAmount(received, expected) {
 }
 
 exports.createPayfastTransportPayment = onCall(
-  { region, secrets: [merchantId, merchantKey, passphrase] },
+  { region, secrets: [merchantId, passphrase] },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in to pay the transport fee.');
@@ -146,7 +145,6 @@ exports.createPayfastTransportPayment = onCall(
     const baseUrl = functionUrl('', projectId).replace(/\/$/, '');
     const params = {
       merchant_id: merchantId.value(),
-      merchant_key: merchantKey.value(),
       return_url: `${baseUrl}/payfastReturn?result=success`,
       cancel_url: `${baseUrl}/payfastReturn?result=cancelled`,
       notify_url: functionUrl('payfastItn', projectId),
