@@ -12,6 +12,10 @@ firebase functions:secrets:set PAYFAST_PASSPHRASE
 
 Configure Payfast’s ITN notification URL as `https://us-central1-riendzo.cloudfunctions.net/payfastItn`. The deployed functions host the payment return and cancellation pages.
 
+Checkout and ITN validation use Payfast Sandbox. Use matching Sandbox merchant credentials. ITN notifications are verified by forwarding Payfast’s original request body to the Sandbox validation endpoint before updating a transport payment.
+
+The HTTPS checkout endpoint is `createPayfastCheckoutHttp`. The legacy callable endpoint is disabled to prevent older app builds from opening a non-Sandbox checkout; install a build configured to use the HTTPS endpoint.
+
 Then install and deploy:
 
 ```

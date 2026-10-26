@@ -32,7 +32,7 @@ class PayfastPaymentService {
   static const _checkoutEndpoint = String.fromEnvironment(
     'PAYFAST_CHECKOUT_ENDPOINT',
     defaultValue:
-        'https://us-central1-riendzo.cloudfunctions.net/createPayfastCheckout',
+        'https://us-central1-riendzo.cloudfunctions.net/createPayfastCheckoutHttp',
   );
 
   final http.Client _client;

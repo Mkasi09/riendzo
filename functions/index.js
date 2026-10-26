@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, Timestamp, FieldValue } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
-const { onRequest } = require('firebase-functions/v2/https');
+const { HttpsError, onCall, onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 
 initializeApp();
@@ -12,6 +12,7 @@ const merchantId = defineSecret('PAYFAST_MERCHANT_ID');
 const merchantKey = defineSecret('PAYFAST_MERCHANT_KEY');
 const passphrase = defineSecret('PAYFAST_PASSPHRASE');
 const functionBaseUrl = 'https://us-central1-riendzo.cloudfunctions.net';
+const payfastBaseUrl = 'https://sandbox.payfast.co.za';
 
 const methodCodes = {
   card: 'cc',
@@ -37,10 +38,17 @@ function htmlCheckout(fields) {
   const inputs = Object.entries(fields)
     .map(([key, value]) => `<input type="hidden" name="${key}" value="${String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">`)
     .join('');
-  return `<!doctype html><html><body><form id="payfast" method="post" action="https://sandbox.payfast.co.za/eng/process">${inputs}</form><script>document.getElementById('payfast').submit()</script></body></html>`;
+  return `<!doctype html><html><body><form id="payfast" method="post" action="${payfastBaseUrl}/eng/process">${inputs}</form><script>document.getElementById('payfast').submit()</script></body></html>`;
 }
 
-exports.createPayfastCheckout = onRequest(
+exports.createPayfastCheckout = onCall({ region: 'us-central1' }, async () => {
+  throw new HttpsError(
+    'failed-precondition',
+    'Please update Riendzo to use Sandbox checkout.',
+  );
+});
+
+exports.createPayfastCheckoutHttp = onRequest(
   {
     region: 'us-central1',
     cors: true,
@@ -140,57 +148,97 @@ exports.payfastPaymentCancel = onRequest({ region: 'us-central1' }, (request, re
 });
 
 exports.payfastItn = onRequest(
-  { region: 'us-central1', secrets: [merchantId, passphrase] },
+  { region: 'us-central1', secrets: [merchantId] },
   async (request, response) => {
-    const payload = request.body || {};
-    const receivedSignature = String(payload.signature || '');
-    const fields = { ...payload };
-    delete fields.signature;
-    if (!receivedSignature || signature(fields, passphrase.value()) !== receivedSignature) {
-      response.status(400).send('Invalid signature');
-      return;
-    }
-    const requestId = String(payload.m_payment_id || '');
-    const transportRef = db.collection('transport_requests').doc(requestId);
-    const transport = await transportRef.get();
-    if (!transport.exists) {
-      response.status(404).send('Unknown payment');
-      return;
-    }
-    if (String(payload.merchant_id || '') !== merchantId.value()) {
-      response.status(400).send('Incorrect merchant');
-      return;
-    }
-    const expectedAmount = Number(
-      transport.data().totalEstimatedFare ?? transport.data().estimatedFare ?? 0,
-    ).toFixed(2);
-    if (Number(payload.amount_gross || 0).toFixed(2) !== expectedAmount) {
-      response.status(400).send('Incorrect amount');
-      return;
-    }
-    const paid = payload.payment_status === 'COMPLETE';
-    const updates = {
-      paymentStatus: paid ? 'paid' : 'payment_failed',
-      paymentId: String(payload.pf_payment_id || ''),
-      paymentMethod: String(payload.payment_method || ''),
-      paymentAmount: Number(payload.amount_gross || 0),
-      paymentUpdatedAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    };
-    if (paid) updates.status = 'pending';
-    await db.runTransaction(async (transaction) => {
-      transaction.update(transportRef, updates);
-      const tripId = transport.data().tripId;
-      if (tripId) {
-        transaction.update(db.collection('trips').doc(tripId), {
-          'transport.paymentStatus': updates.paymentStatus,
-          'transport.paymentId': updates.paymentId,
-          'transport.paymentMethod': updates.paymentMethod,
-          'transport.paymentAmount': updates.paymentAmount,
-          'transport.status': paid ? 'requested' : 'awaiting_payment',
-        });
+    try {
+      if (request.method !== 'POST' || !Buffer.isBuffer(request.rawBody)) {
+        response.status(400).send('Invalid payment notification');
+        return;
       }
-    });
-    response.status(200).send('OK');
+
+      const validation = await fetch(`${payfastBaseUrl}/eng/query/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: request.rawBody,
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!validation.ok) {
+        console.error('Payfast ITN validation request failed', validation.status);
+        response.status(502).send('Could not validate payment notification');
+        return;
+      }
+      if ((await validation.text()).trim() !== 'VALID') {
+        response.status(400).send('Invalid payment notification');
+        return;
+      }
+
+      const payload = request.body || {};
+      const requestId = String(payload.m_payment_id || '');
+      if (!requestId) {
+        response.status(400).send('Missing payment reference');
+        return;
+      }
+      if (String(payload.merchant_id || '') !== merchantId.value()) {
+        response.status(400).send('Incorrect merchant');
+        return;
+      }
+
+      const transportRef = db.collection('transport_requests').doc(requestId);
+      const outcome = await db.runTransaction(async (transaction) => {
+        const transport = await transaction.get(transportRef);
+        if (!transport.exists) return 'unknown';
+        const data = transport.data() || {};
+        const expectedAmount = Number(
+          data.totalEstimatedFare ?? data.estimatedFare ?? 0,
+        ).toFixed(2);
+        if (Number(payload.amount_gross || 0).toFixed(2) !== expectedAmount) {
+          return 'incorrect_amount';
+        }
+
+        const tripId = data.tripId;
+        const tripRef = tripId ? db.collection('trips').doc(tripId) : null;
+        const trip = tripRef ? await transaction.get(tripRef) : null;
+        const paid = payload.payment_status === 'COMPLETE';
+        if (data.paymentStatus === 'paid' && !paid) return 'already_paid';
+
+        const paymentStatus = paid ? 'paid' : 'payment_failed';
+        const paymentId = String(payload.pf_payment_id || '');
+        const paymentMethod = String(payload.payment_method || '');
+        const paymentAmount = Number(payload.amount_gross || 0);
+        const updates = {
+          paymentStatus,
+          paymentId,
+          paymentMethod,
+          paymentAmount,
+          paymentUpdatedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        };
+        if (paid) updates.status = 'pending';
+        transaction.update(transportRef, updates);
+
+        if (tripRef && trip && trip.exists) {
+          transaction.update(tripRef, {
+            'transport.paymentStatus': paymentStatus,
+            'transport.paymentId': paymentId,
+            'transport.paymentMethod': paymentMethod,
+            'transport.paymentAmount': paymentAmount,
+            'transport.status': paid ? 'requested' : 'awaiting_payment',
+          });
+        }
+        return null;
+      });
+      if (outcome === 'unknown') {
+        response.status(404).send('Unknown payment');
+        return;
+      }
+      if (outcome === 'incorrect_amount') {
+        response.status(400).send('Incorrect amount');
+        return;
+      }
+      response.status(200).send('OK');
+    } catch (error) {
+      console.error('payfastItn failed', error);
+      response.status(500).send('Unable to process payment notification');
+    }
   },
 );

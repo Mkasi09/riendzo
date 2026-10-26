@@ -3424,6 +3424,13 @@ class _TransportCard extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
+          if (paymentStatus == 'paid') ...[
+            const SizedBox(height: 10),
+            const _MiniChip(
+              icon: Icons.verified_outlined,
+              text: 'Transport estimate paid',
+            ),
+          ],
           if ((paymentStatus == 'awaiting_payment' ||
                   paymentStatus == 'payment_failed' ||
                   paymentStatus == 'checkout_started') &&
