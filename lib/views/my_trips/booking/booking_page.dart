@@ -1407,12 +1407,15 @@ class _ReviewCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
+                    flex: 2,
                     child: Text(
                       row.$1,
                       style: const TextStyle(color: Colors.black54),
                     ),
                   ),
-                  Flexible(
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 3,
                     child: Text(
                       row.$2,
                       textAlign: TextAlign.right,
