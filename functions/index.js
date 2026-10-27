@@ -1,9 +1,9 @@
-const crypto = require('crypto');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, Timestamp, FieldValue } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 const { HttpsError, onCall, onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
+const { htmlCheckout, signature } = require('./payfast_signature');
 
 initializeApp();
 const db = getFirestore();
@@ -21,25 +21,6 @@ const methodCodes = {
   instant_eft: 'ef',
   capitec_pay: 'cp',
 };
-
-function parameterString(data, phrase) {
-  const values = Object.entries(data)
-    .filter(([, value]) => value !== undefined && value !== null && value !== '')
-    .map(([key, value]) => `${key}=${encodeURIComponent(String(value).trim()).replace(/%20/g, '+')}`);
-  if (phrase) values.push(`passphrase=${encodeURIComponent(phrase.trim()).replace(/%20/g, '+')}`);
-  return values.join('&');
-}
-
-function signature(data, phrase) {
-  return crypto.createHash('md5').update(parameterString(data, phrase)).digest('hex');
-}
-
-function htmlCheckout(fields) {
-  const inputs = Object.entries(fields)
-    .map(([key, value]) => `<input type="hidden" name="${key}" value="${String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">`)
-    .join('');
-  return `<!doctype html><html><body><form id="payfast" method="post" action="${payfastBaseUrl}/eng/process">${inputs}</form><script>document.getElementById('payfast').submit()</script></body></html>`;
-}
 
 exports.createPayfastCheckout = onCall({ region: 'us-central1' }, async () => {
   throw new HttpsError(
@@ -132,7 +113,9 @@ exports.payfastCheckout = onRequest({ region: 'us-central1' }, async (request, r
     response.status(410).send('This checkout link has expired. Return to Riendzo and try again.');
     return;
   }
-  response.set('Content-Type', 'text/html; charset=utf-8').send(htmlCheckout(data.payload));
+  response
+    .set('Content-Type', 'text/html; charset=utf-8')
+    .send(htmlCheckout(data.payload, payfastBaseUrl));
 });
 
 exports.payfastPaymentReturn = onRequest({ region: 'us-central1' }, (request, response) => {

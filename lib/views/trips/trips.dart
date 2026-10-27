@@ -28,12 +28,19 @@ class _TripsFeedState extends State<TripsFeed> {
   List<DocumentSnapshot> filteredTrips = [];
   bool hasSearched = false;
   String searchInput = '';
+  String? exactDestinationSearch;
   bool onlyAvailable = false;
   _DiscoverTab selectedTab = _DiscoverTab.recommended;
 
-  void onSearch(String searchInput) {
+  void onSearch(String searchInput, {bool exactDestination = false}) {
     final query = searchInput.trim();
-    setState(() => this.searchInput = query);
+    final exactDestinationQuery = exactDestination && query.isNotEmpty
+        ? query.toLowerCase()
+        : null;
+    setState(() {
+      this.searchInput = query;
+      exactDestinationSearch = exactDestinationQuery;
+    });
 
     if (query.isEmpty) {
       setState(() {
@@ -52,7 +59,11 @@ class _TripsFeedState extends State<TripsFeed> {
           final matching = snapshot.docs.where((doc) {
             final data = doc.data();
             final destination = (data['destination'] as String? ?? '')
+                .trim()
                 .toLowerCase();
+            if (exactDestinationQuery != null) {
+              return destination == exactDestinationQuery;
+            }
             return searchWords.any(destination.contains);
           }).toList();
           final filtered = _applyTabFilters(matching);
@@ -127,6 +138,7 @@ class _TripsFeedState extends State<TripsFeed> {
                     selectedTab = tab;
                     hasSearched = false;
                     filteredTrips = [];
+                    exactDestinationSearch = null;
                   });
                 },
               ),
@@ -166,10 +178,25 @@ class _TripsFeedState extends State<TripsFeed> {
                 emptyText: isPast
                     ? 'No past trips yet.'
                     : 'No trips match these filters yet.',
-                builder: (trips) => _TripList(
-                  trips: _applyTabFilters(trips),
-                  emptyText: 'No trips match these filters yet.',
-                ),
+                builder: (trips) {
+                  final visibleTrips = _applyTabFilters(trips);
+                  return Column(
+                    children: [
+                      if (!isPast)
+                        _SuggestedDestinations(
+                          destinations: _suggestedDestinations(visibleTrips),
+                          onSelected: (destination) {
+                            setState(() => selectedTab = _DiscoverTab.upcoming);
+                            onSearch(destination, exactDestination: true);
+                          },
+                        ),
+                      _TripList(
+                        trips: visibleTrips,
+                        emptyText: 'No trips match these filters yet.',
+                      ),
+                    ],
+                  );
+                },
               ),
           ],
         ),
@@ -208,6 +235,7 @@ class _TripsFeedState extends State<TripsFeed> {
   }
 
   List<DocumentSnapshot> _applyTabFilters(List<DocumentSnapshot> source) {
+    final today = DateUtils.dateOnly(DateTime.now());
     final trips = source.where((trip) {
       final data = trip.data() as Map<String, dynamic>;
       final status = data['status']?.toString();
@@ -215,6 +243,11 @@ class _TripsFeedState extends State<TripsFeed> {
         if (status != 'completed') return false;
       } else if (status != 'ongoing') {
         return false;
+      }
+
+      if (selectedTab == _DiscoverTab.upcoming) {
+        final start = _tryParseDate(data['startDate']?.toString());
+        if (start == null || start.isBefore(today)) return false;
       }
 
       final current = DiscoverTripCard.currentGroupSize(data);
@@ -275,6 +308,58 @@ class _TripsFeedState extends State<TripsFeed> {
         trips.sort((a, b) => compareDate(b, a));
     }
     return trips;
+  }
+
+  List<_SuggestedDestination> _suggestedDestinations(
+    List<DocumentSnapshot> trips,
+  ) {
+    final byDestination = <String, _SuggestedDestination>{};
+    final today = DateUtils.dateOnly(DateTime.now());
+    for (final trip in trips) {
+      final data = trip.data() as Map<String, dynamic>;
+      final destination = data['destination']?.toString().trim() ?? '';
+      final departure = _tryParseDate(data['startDate']?.toString());
+      if (destination.isEmpty ||
+          departure == null ||
+          departure.isBefore(today)) {
+        continue;
+      }
+
+      final key = destination.toLowerCase();
+      final imageUrls = data['imageUrls'];
+      final imageUrl = imageUrls is List && imageUrls.isNotEmpty
+          ? imageUrls
+                .firstWhere(
+                  (url) => url.toString().trim().isNotEmpty,
+                  orElse: () => data['imagePath']?.toString() ?? '',
+                )
+                .toString()
+          : data['imagePath']?.toString() ?? '';
+      final suggestion = byDestination.putIfAbsent(
+        key,
+        () => _SuggestedDestination(
+          name: destination,
+          nextDeparture: departure,
+          imageUrl: imageUrl,
+        ),
+      );
+      suggestion.tripCount++;
+      if (departure.isBefore(suggestion.nextDeparture)) {
+        suggestion.nextDeparture = departure;
+      }
+      if (suggestion.imageUrl.isEmpty && imageUrl.isNotEmpty) {
+        suggestion.imageUrl = imageUrl;
+      }
+    }
+
+    final suggestions = byDestination.values.toList()
+      ..sort((a, b) {
+        final countOrder = b.tripCount.compareTo(a.tripCount);
+        return countOrder != 0
+            ? countOrder
+            : a.nextDeparture.compareTo(b.nextDeparture);
+      });
+    return suggestions.take(8).toList();
   }
 
   void updateCompletedTrip(DocumentSnapshot trip) {
@@ -509,6 +594,130 @@ class _TripSkeletonList extends StatelessWidget {
           ),
           child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
         ),
+      ),
+    );
+  }
+}
+
+class _SuggestedDestination {
+  final String name;
+  DateTime nextDeparture;
+  int tripCount = 0;
+  String imageUrl;
+
+  _SuggestedDestination({
+    required this.name,
+    required this.nextDeparture,
+    required this.imageUrl,
+  });
+}
+
+class _SuggestedDestinations extends StatelessWidget {
+  final List<_SuggestedDestination> destinations;
+  final ValueChanged<String> onSelected;
+
+  const _SuggestedDestinations({
+    required this.destinations,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (destinations.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Suggested destinations',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 160,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: destinations.length,
+              separatorBuilder: (context, index) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final destination = destinations[index];
+                return SizedBox(
+                  width: 230,
+                  child: Material(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(18),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: () => onSelected(destination.name),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (destination.imageUrl.isNotEmpty)
+                            CachedNetworkImage(
+                              imageUrl: destination.imageUrl,
+                              fit: BoxFit.cover,
+                              errorWidget: (context, url, error) =>
+                                  const ColoredBox(color: Color(0xFF315C56)),
+                            )
+                          else
+                            const ColoredBox(color: Color(0xFF315C56)),
+                          const DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [Color(0x11000000), Color(0xCC000000)],
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            left: 14,
+                            right: 14,
+                            bottom: 13,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  destination.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  '${destination.tripCount} upcoming ${destination.tripCount == 1 ? 'trip' : 'trips'} · ${DateFormat('d MMM').format(destination.nextDeparture)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(color: Colors.white),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Positioned(
+                            top: 12,
+                            right: 12,
+                            child: Icon(
+                              Icons.north_east_rounded,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
